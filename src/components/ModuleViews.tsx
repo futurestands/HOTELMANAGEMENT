@@ -1,126 +1,234 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { Room } from '../types/hotel';
 
 interface ModuleViewProps {
   moduleName: string;
+  hotelId?: string;
+  userRole?: string;
 }
 
-export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName }) => {
-  const [searchTerm, setSearchTerm] = useState('');
+export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) => {
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [notice, setNotice] = useState<string>('');
 
-  const handleAction = (e: React.FormEvent) => {
+  // New Room Form State
+  const [roomNumber, setRoomNumber] = useState('');
+  const [roomFloor, setRoomFloor] = useState('1');
+  const [roomStatus, setRoomStatus] = useState<Room['status']>('available');
+  const [submitting, setSubmitting] = useState(false);
+
+  // Fetch rooms from database if Rooms module is active
+  useEffect(() => {
+    if (moduleName === 'Rooms') {
+      fetchRooms();
+    }
+  }, [moduleName, hotelId]);
+
+  const fetchRooms = async () => {
+    if (!supabase) {
+      setError('Supabase client not configured. Cannot fetch database records.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+
+    try {
+      let query = supabase.from('rooms').select('*');
+      if (hotelId) {
+        query = query.eq('hotel_id', hotelId);
+      }
+      const { data, error: fetchError } = await query;
+      if (fetchError) throw fetchError;
+      setRooms(data || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to load rooms from database.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase) {
-      setNotice(`[Development Mode] Database mutation for ${moduleName} is simulated. Connect Supabase to persist records.`);
-    } else {
-      setNotice(`Database mutation submitted for ${moduleName}.`);
+      setError('Supabase client not configured.');
+      return;
     }
-    setModalOpen(false);
-    setTimeout(() => setNotice(''), 5000);
+    if (!roomNumber.trim()) {
+      setError('Room number is required.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      // Check duplicate room number
+      const existing = rooms.find(r => r.room_number.toLowerCase() === roomNumber.trim().toLowerCase());
+      if (existing) {
+        throw new Error(`Room number "${roomNumber}" already exists in this hotel.`);
+      }
+
+      const payload = {
+        hotel_id: hotelId || '00000000-0000-0000-0000-000000000001', // fallback demo id if unlinked
+        room_number: roomNumber.trim(),
+        floor: roomFloor.trim(),
+        status: roomStatus,
+        housekeeping_status: 'clean'
+      };
+
+      const { data, error: insertError } = await supabase
+        .from('rooms')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      setNotice(`Room "${data.room_number}" successfully created and verified!`);
+      setModalOpen(false);
+      setRoomNumber('');
+      fetchRooms();
+    } catch (err: any) {
+      setError(err.message || 'Failed to save room.');
+    } finally {
+      setSubmitting(false);
+    }
   };
+
+  if (moduleName === 'Rooms') {
+    return (
+      <div className="module-container">
+        {error && <div className="error-banner"><strong>Database Error:</strong> {error}</div>}
+        {notice && <div className="success-banner">{notice}</div>}
+
+        <div className="module-header-actions">
+          <div className="info-badge">
+            <span>🛏️ Rooms Module (Database Backed via RLS)</span>
+          </div>
+          <button onClick={() => setModalOpen(true)} className="primary">
+            + Add New Room
+          </button>
+        </div>
+
+        {modalOpen && (
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <h3>Add New Hotel Room</h3>
+              <p className="modal-sub">Enforces unique room number per hotel and RLS write policies.</p>
+              <form onSubmit={handleCreateRoom} className="modal-form">
+                <div className="form-field">
+                  <label>Room Number / Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={roomNumber}
+                    onChange={(e) => setRoomNumber(e.target.value)}
+                    placeholder="e.g. 101 or Suite A"
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Floor</label>
+                  <input
+                    type="text"
+                    value={roomFloor}
+                    onChange={(e) => setRoomFloor(e.target.value)}
+                    placeholder="1"
+                    className="form-input"
+                  />
+                </div>
+                <div className="form-field">
+                  <label>Initial Status</label>
+                  <select
+                    value={roomStatus}
+                    onChange={(e) => setRoomStatus(e.target.value as Room['status'])}
+                    className="form-input"
+                  >
+                    <option value="available">Available</option>
+                    <option value="reserved">Reserved</option>
+                    <option value="occupied">Occupied</option>
+                    <option value="cleaning">Cleaning</option>
+                    <option value="maintenance">Maintenance</option>
+                    <option value="out_of_service">Out of Service</option>
+                  </select>
+                </div>
+                <div className="modal-actions">
+                  <button type="button" onClick={() => setModalOpen(false)} className="secondary">Cancel</button>
+                  <button type="submit" disabled={submitting} className="primary">
+                    {submitting ? 'Saving...' : 'Save Room'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        <div className="table-card">
+          <div className="table-header">
+            <h2>Configured Hotel Rooms</h2>
+            <span className="badge">{rooms.length} Rooms Found</span>
+          </div>
+
+          <div className="table-responsive">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Room Number</th>
+                  <th>Floor</th>
+                  <th>Status</th>
+                  <th>Housekeeping</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="empty-table-cell">Loading rooms from database...</td>
+                  </tr>
+                ) : rooms.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="empty-table-cell">
+                      <div className="empty-state-box">
+                        <p>No rooms configured in the database yet.</p>
+                        <small>Click "+ Add New Room" above to insert a room record.</small>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  rooms.map((room) => (
+                    <tr key={room.id}>
+                      <td><strong>Room {room.room_number}</strong></td>
+                      <td>Floor {room.floor || '1'}</td>
+                      <td><span className={`tag ${room.status}`}>{room.status}</span></td>
+                      <td><span className="badge clean">{room.housekeeping_status || 'clean'}</span></td>
+                      <td>
+                        <button className="table-btn" onClick={() => alert(`Room ${room.room_number} details view.`)}>View</button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="module-container">
-      {notice && <div className="notice-banner">{notice}</div>}
-
-      <div className="module-header-actions">
-        <div className="search-box">
-          <input
-            type="text"
-            placeholder={`Search ${moduleName.toLowerCase()}...`}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input"
-          />
-        </div>
-        <button onClick={() => setModalOpen(true)} className="primary">
-          + Add New {moduleName.slice(0, -1)}
-        </button>
+      <div className="table-card" style={{ padding: '40px', textAlign: 'center' }}>
+        <h2>{moduleName} Module</h2>
+        <p className="muted" style={{ margin: '12px 0 20px' }}>
+          This module is scaffolded and awaiting Phase 2 implementation. Database schema migrations are ready.
+        </p>
+        <span className="badge">Coming in Phase 2</span>
       </div>
-
-      {modalOpen && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3>New {moduleName.slice(0, -1)} Entry</h3>
-            <p className="modal-sub">Data will be validated against tenant rules before database insertion.</p>
-            <form onSubmit={handleAction} className="modal-form">
-              <div className="form-field">
-                <label>Name / Reference</label>
-                <input type="text" required placeholder="Enter reference ID or name" className="form-input" />
-              </div>
-              <div className="form-field">
-                <label>Details / Amount</label>
-                <input type="text" required placeholder="Enter details" className="form-input" />
-              </div>
-              <div className="modal-actions">
-                <button type="button" onClick={() => setModalOpen(false)} className="secondary">Cancel</button>
-                <button type="submit" className="primary">Save to Database</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div className="table-card">
-        <div className="table-header">
-          <h2>{moduleName} Management</h2>
-          <span className="badge">Tenant Isolated (RLS)</span>
-        </div>
-
-        <div className="table-responsive">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Record ID</th>
-                <th>Name / Entity</th>
-                <th>Status</th>
-                <th>Details / Value</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td colSpan={5} className="empty-table-cell">
-                  <div className="empty-state-box">
-                    <p>No records found in database for <strong>{moduleName}</strong>.</p>
-                    <small>Connect Supabase and apply migrations or click "+ Add New" to create records.</small>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <style>{`
-        .module-container { display: flex; flex-direction: column; gap: 20px; }
-        .notice-banner { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; padding: 12px 16px; border-radius: 10px; font-weight: 600; font-size: 14px; }
-        .module-header-actions { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
-        .search-input { padding: 10px 14px; border-radius: 10px; border: 1px solid #cbd5e1; width: 280px; font-size: 14px; outline: none; background: white; }
-        .table-card { background: white; border: 1px solid #e8ebf1; border-radius: 14px; overflow: hidden; box-shadow: 0 3px 14px rgba(15,23,42,.03); }
-        .table-header { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; }
-        .table-responsive { overflow-x: auto; }
-        .data-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
-        .data-table th { background: #f8fafc; padding: 14px 20px; color: #475569; font-weight: 650; border-bottom: 1px solid #e2e8f0; }
-        .data-table td { padding: 14px 20px; border-bottom: 1px solid #f1f5f9; color: #334155; }
-        .badge { background: #eff6ff; color: #1d4ed8; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-        .empty-table-cell { text-align: center; padding: 40px !important; }
-        .empty-state-box { display: flex; flex-direction: column; gap: 6px; align-items: center; color: #64748b; }
-        .empty-state-box p { margin: 0; font-size: 15px; color: #334155; }
-        .empty-state-box small { color: #94a3b8; }
-        .modal-overlay { position: fixed; inset: 0; background: rgba(15,23,42,0.6); display: grid; place-items: center; z-index: 100; }
-        .modal-content { background: white; padding: 30px; border-radius: 16px; width: 100%; max-width: 420px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); }
-        .modal-sub { font-size: 13px; color: #64748b; margin: 4px 0 16px; }
-        .modal-form { display: flex; flex-direction: column; gap: 16px; }
-        .form-field { display: flex; flex-direction: column; gap: 6px; }
-        .form-field label { font-size: 13px; font-weight: 600; color: #334155; }
-        .form-input { padding: 10px 12px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; outline: none; }
-        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 10px; }
-        .secondary { background: #f1f5f9; color: #475569; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
-        .primary { background: #172554; color: white; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; cursor: pointer; }
-      `}</style>
     </div>
   );
 };

@@ -14,10 +14,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo, onAuthSucces
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
 
+  const isDev = import.meta.env.DEV;
+
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase) {
-      setMessage({ text: 'Supabase client is not configured. Use Development Demo Mode below.', error: true });
+      setMessage({ text: 'Supabase client is not configured. Check environment variables.', error: true });
       return;
     }
     setLoading(true);
@@ -94,20 +96,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo, onAuthSucces
           </form>
         ) : (
           <div style={styles.warningBox}>
-            <p><strong>Supabase Not Connected:</strong> Environment variables VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing. Production auth is inactive.</p>
+            <p><strong>Supabase Not Connected:</strong> Environment variables VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing.</p>
           </div>
         )}
 
-        <div style={styles.divider}>
-          <span>[DEV MODE] SELECT TEST ROLE</span>
-        </div>
-
-        <div style={styles.demoRoles}>
-          <button onClick={() => onBypassDemo('owner')} style={styles.demoButton}>👑 Owner</button>
-          <button onClick={() => onBypassDemo('manager')} style={styles.demoButton}>📊 Manager</button>
-          <button onClick={() => onBypassDemo('receptionist')} style={styles.demoButton}>📅 Receptionist</button>
-          <button onClick={() => onBypassDemo('cashier')} style={styles.demoButton}>💳 Cashier</button>
-        </div>
+        {/* Production Security Rule: Demo mode is strictly gated behind import.meta.env.DEV */}
+        {isDev && (
+          <>
+            <div style={styles.divider}>
+              <span>[DEV MODE ONLY] TEST ROLE BYPASS</span>
+            </div>
+            <div style={styles.demoRoles}>
+              <button onClick={() => onBypassDemo('owner')} style={styles.demoButton}>👑 Owner</button>
+              <button onClick={() => onBypassDemo('manager')} style={styles.demoButton}>📊 Manager</button>
+              <button onClick={() => onBypassDemo('receptionist')} style={styles.demoButton}>📅 Receptionist</button>
+              <button onClick={() => onBypassDemo('cashier')} style={styles.demoButton}>💳 Cashier</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
