@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { UserRole } from '../types/hotel';
 
 interface AuthModalProps {
-  onBypassDemo: (role: string) => void;
+  onBypassDemo: (role: UserRole) => void;
+  onAuthSuccess: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo, onAuthSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -15,7 +17,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo }) => {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase) {
-      setMessage({ text: 'Supabase client is not configured. Use Demo Mode below.', error: true });
+      setMessage({ text: 'Supabase client is not configured. Use Development Demo Mode below.', error: true });
       return;
     }
     setLoading(true);
@@ -30,6 +32,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo }) => {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
         setMessage({ text: 'Signed in successfully!' });
+        onAuthSuccess();
       }
     } catch (err: any) {
       setMessage({ text: err.message || 'Authentication error', error: true });
@@ -79,7 +82,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo }) => {
             )}
 
             <button type="submit" disabled={loading} style={styles.primaryButton}>
-              {loading ? 'Processing...' : isSignUp ? 'Create Staff Account' : 'Sign In'}
+              {loading ? 'Processing...' : isSignUp ? 'Create Staff Account' : 'Sign In with Supabase'}
             </button>
 
             <div style={styles.toggleRow}>
@@ -91,16 +94,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo }) => {
           </form>
         ) : (
           <div style={styles.warningBox}>
-            <p>Supabase is not connected. You can test the application immediately using Demo Mode.</p>
+            <p><strong>Supabase Not Connected:</strong> Environment variables VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing. Production auth is inactive.</p>
           </div>
         )}
 
         <div style={styles.divider}>
-          <span>OR TEST WITH DEMO ROLES</span>
+          <span>[DEV MODE] SELECT TEST ROLE</span>
         </div>
 
         <div style={styles.demoRoles}>
-          <button onClick={() => onBypassDemo('owner')} style={styles.demoButton}>👑 Hotel Owner</button>
+          <button onClick={() => onBypassDemo('owner')} style={styles.demoButton}>👑 Owner</button>
           <button onClick={() => onBypassDemo('manager')} style={styles.demoButton}>📊 Manager</button>
           <button onClick={() => onBypassDemo('receptionist')} style={styles.demoButton}>📅 Receptionist</button>
           <button onClick={() => onBypassDemo('cashier')} style={styles.demoButton}>💳 Cashier</button>
@@ -190,7 +193,7 @@ const styles = {
     border: '1px solid #fde68a',
     borderRadius: '10px',
     padding: '14px',
-    fontSize: '14px',
+    fontSize: '13px',
     color: '#b45309',
     marginBottom: '18px',
     textAlign: 'center' as const,

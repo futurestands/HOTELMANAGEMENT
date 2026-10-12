@@ -42,16 +42,18 @@ export interface RoomType {
   name: string;
   description?: string;
   base_rate: number;
+  minimum_rate: number;
+  is_active: boolean;
 }
 
 export interface Room {
   id: string;
   hotel_id: string;
-  room_type_id: string;
+  room_type_id?: string;
   room_number: string;
-  status: 'available' | 'reserved' | 'occupied' | 'cleaning' | 'maintenance' | 'out_of_service';
-  housekeeping_status: 'clean' | 'dirty' | 'inspecting';
   floor?: string;
+  status: 'available' | 'reserved' | 'occupied' | 'cleaning' | 'maintenance' | 'out_of_service';
+  housekeeping_status?: 'clean' | 'dirty' | 'inspecting';
 }
 
 export interface Guest {
@@ -99,4 +101,28 @@ export interface StockItem {
   quantity_in_stock: number;
   reorder_threshold: number;
   unit_cost: number;
+}
+
+// Role permission mapping helper
+export function getModulesForRole(role: UserRole): string[] {
+  switch (role) {
+    case 'platform_admin':
+    case 'owner':
+    case 'administrator':
+      return ['Reservations', 'Rooms', 'Cashier', 'Inventory', 'Restaurant', 'HR', 'Reports', 'Settings'];
+    case 'manager':
+      return ['Reservations', 'Rooms', 'Cashier', 'Inventory', 'Restaurant', 'HR', 'Reports'];
+    case 'receptionist':
+      return ['Reservations', 'Rooms', 'Cashier'];
+    case 'cashier':
+      return ['Cashier', 'Reservations'];
+    case 'storekeeper':
+      return ['Inventory'];
+    case 'restaurant_staff':
+      return ['Restaurant'];
+    case 'hr':
+      return ['HR'];
+    default:
+      return ['Reservations', 'Rooms'];
+  }
 }

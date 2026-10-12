@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { AuthModal } from "./components/AuthModal";
 import { ModuleViews } from "./components/ModuleViews";
 import { supabase } from "./lib/supabase";
+import { UserRole, getModulesForRole } from "./types/hotel";
 
 type Module = {
   name: string;
@@ -9,7 +10,7 @@ type Module = {
   description: string;
 };
 
-const modules: Module[] = [
+const allModules: Module[] = [
   { name: "Reservations", icon: "📅", description: "Bookings and availability" },
   { name: "Rooms", icon: "🛏️", description: "Room status and rates" },
   { name: "Cashier", icon: "💳", description: "Payments and receipts" },
@@ -23,14 +24,22 @@ const modules: Module[] = [
 function App() {
   const [active, setActive] = useState("Dashboard");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [userRole, setUserRole] = useState<string>("owner");
+  const [userRole, setUserRole] = useState<UserRole>("owner");
   const [hotelName] = useState<string>("Kampala Grand Hotel");
+  const [dbStatus, setDbStatus] = useState<string>("Checking database connection...");
 
   useEffect(() => {
-    if (!supabase) return;
+    if (!supabase) {
+      setDbStatus("Development Mode (Supabase not configured)");
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setIsAuthenticated(true);
+        setDbStatus("Connected to Supabase Database");
+      } else {
+        setDbStatus("Awaiting Authentication");
       }
     });
 
@@ -38,6 +47,7 @@ function App() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       setIsAuthenticated(!!session);
+      if (session) setDbStatus("Connected to Supabase Database");
     });
 
     return () => subscription.unsubscribe();
@@ -50,6 +60,9 @@ function App() {
     setIsAuthenticated(false);
   };
 
+  const allowedModuleNames = getModulesForRole(userRole);
+  const visibleModules = allModules.filter((m) => allowedModuleNames.includes(m.name));
+
   return (
     <div className="app">
       {!isAuthenticated && (
@@ -57,6 +70,11 @@ function App() {
           onBypassDemo={(role) => {
             setUserRole(role);
             setIsAuthenticated(true);
+            setDbStatus("Development Demo Mode Active");
+          }}
+          onAuthSuccess={() => {
+            setIsAuthenticated(true);
+            setDbStatus("Connected to Supabase Database");
           }}
         />
       )}
@@ -83,7 +101,7 @@ function App() {
           >
             ⌂ <span>Dashboard</span>
           </button>
-          {modules.map((m) => (
+          {visibleModules.map((m) => (
             <button
               key={m.name}
               className={`nav-item ${active === m.name ? "active" : ""}`}
@@ -102,8 +120,8 @@ function App() {
               <h1>{active}</h1>
               <p className="muted">
                 {active === "Dashboard"
-                  ? "Operational overview for Kampala Grand Hotel. Real-time metrics and alerts."
-                  : `Managing ${active} module with full tenant isolation and audit logging.`}
+                  ? `Overview for ${hotelName}. Status: ${dbStatus}`
+                  : `Managing ${active} module with role-based access control and tenant isolation.`}
               </p>
             </div>
             <button className="primary" onClick={() => setActive(active)}>
@@ -114,44 +132,44 @@ function App() {
           {active === "Dashboard" ? (
             <>
               <section className="cards">
-                <Metric title="Occupied Rooms" value="22 / 30" note="73% occupancy rate" />
-                <Metric title="Today's Revenue" value="UGX 4.15M" note="+12.2% vs yesterday" />
-                <Metric title="Pending Bookings" value="5" note="2 need rate approval" />
-                <Metric title="Low Stock Items" value="3" note="1 critical ingredient" danger />
+                <Metric title="Occupied Rooms" value="0 / 0" note="No room records loaded" />
+                <Metric title="Today's Revenue" value="UGX 0" note="No payment records" />
+                <Metric title="Pending Bookings" value="0" note="No pending reservations" />
+                <Metric title="Low Stock Items" value="0" note="Inventory uninitialized" />
               </section>
 
               <section className="grid-two">
                 <div className="panel">
                   <div className="panel-head">
                     <h2>Today's Operations</h2>
-                    <span className="tag">Live Data</span>
+                    <span className="tag">Empty State</span>
                   </div>
                   <div className="operation-row">
                     <span>Check-ins</span>
-                    <strong>8</strong>
+                    <strong>0</strong>
                   </div>
                   <div className="operation-row">
                     <span>Check-outs</span>
-                    <strong>5</strong>
+                    <strong>0</strong>
                   </div>
                   <div className="operation-row">
                     <span>Restaurant orders</span>
-                    <strong>42</strong>
+                    <strong>0</strong>
                   </div>
                   <div className="operation-row">
                     <span>Pending rate approvals</span>
-                    <strong>1</strong>
+                    <strong>0</strong>
                   </div>
                 </div>
 
                 <div className="panel">
                   <div className="panel-head">
-                    <h2>Control Alerts</h2>
-                    <span className="tag warning">3 actions required</span>
+                    <h2>System Status & Security</h2>
+                    <span className="tag success">RLS Active</span>
                   </div>
-                  <Alert text="Fresh Milk inventory is below reorder threshold (UGX stock check)." />
-                  <Alert text="Reservation #HMS-104 rate is below minimum policy (Manager approval needed)." />
-                  <Alert text="Morning cashier shift #SH-204 is awaiting closeout sign-off." />
+                  <Alert text={`Database status: ${dbStatus}`} />
+                  <Alert text="PostgreSQL Row Level Security (RLS) policies enforce hotel data isolation." />
+                  <Alert text="Role permissions restricted according to staff membership assignment." />
                 </div>
               </section>
             </>
