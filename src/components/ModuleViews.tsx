@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Room } from '../types/hotel';
+import { Room, UserRole } from '../types/hotel';
 
 interface ModuleViewProps {
   moduleName: string;
   hotelId?: string;
-  userRole?: string;
+  userRole?: UserRole;
 }
 
-export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) => {
+export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, userRole }) => {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -21,31 +21,39 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
   const [roomStatus, setRoomStatus] = useState<Room['status']>('available');
   const [submitting, setSubmitting] = useState(false);
 
-  // Fetch rooms from database if Rooms module is active
+  const canManageRooms = ['owner', 'administrator', 'manager', 'receptionist'].includes(userRole || '');
+
   useEffect(() => {
     if (moduleName === 'Rooms') {
-      fetchRooms();
+      if (!hotelId) {
+        setRooms([]);
+        setLoading(false);
+        setError('No active hotel selected. Please select a valid hotel membership.');
+        return;
+      }
+      fetchRooms(hotelId);
     }
   }, [moduleName, hotelId]);
 
-  const fetchRooms = async () => {
+  const fetchRooms = async (targetHotelId: string) => {
     if (!supabase) {
-      setError('Supabase client not configured. Cannot fetch database records.');
+      setError('Supabase client is not configured. Cannot load database records.');
       return;
     }
     setLoading(true);
     setError(null);
 
     try {
-      let query = supabase.from('rooms').select('*');
-      if (hotelId) {
-        query = query.eq('hotel_id', hotelId);
-      }
-      const { data, error: fetchError } = await query;
+      const { data, error: fetchError } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('hotel_id', targetHotelId)
+        .order('room_number', { ascending: true });
+
       if (fetchError) throw fetchError;
       setRooms(data || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to load rooms from database.');
+      setError(err.message || 'Failed to fetch rooms from database.');
     } finally {
       setLoading(false);
     }
@@ -54,11 +62,19 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
   const handleCreateRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase) {
-      setError('Supabase client not configured.');
+      setError('Supabase is not configured.');
+      return;
+    }
+    if (!hotelId) {
+      setError('No active hotel selected.');
       return;
     }
     if (!roomNumber.trim()) {
       setError('Room number is required.');
+      return;
+    }
+    if (!canManageRooms) {
+      setError('You do not have permission to manage rooms.');
       return;
     }
 
@@ -67,15 +83,16 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
     setNotice(null);
 
     try {
-      // Check duplicate room number
-      const existing = rooms.find(r => r.room_number.toLowerCase() === roomNumber.trim().toLowerCase());
-      if (existing) {
-        throw new Error(`Room number "${roomNumber}" already exists in this hotel.`);
+      // Client-side case-insensitive duplicate check
+      const trimmedNum = roomNumber.trim();
+      const duplicate = rooms.find(r => r.room_number.toLowerCase() === trimmedNum.toLowerCase());
+      if (duplicate) {
+        throw new Error(`Room number "${trimmedNum}" already exists in this hotel.`);
       }
 
       const payload = {
-        hotel_id: hotelId || '00000000-0000-0000-0000-000000000001', // fallback demo id if unlinked
-        room_number: roomNumber.trim(),
+        hotel_id: hotelId,
+        room_number: trimmedNum,
         floor: roomFloor.trim(),
         status: roomStatus,
         housekeeping_status: 'clean'
@@ -89,12 +106,13 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
 
       if (insertError) throw insertError;
 
-      setNotice(`Room "${data.room_number}" successfully created and verified!`);
+      setNotice(`Room "${data.room_number}" successfully created and persisted.`);
       setModalOpen(false);
       setRoomNumber('');
-      fetchRooms();
+      setRoomFloor('1');
+      await fetchRooms(hotelId);
     } catch (err: any) {
-      setError(err.message || 'Failed to save room.');
+      setError(err.message || 'Database error occurred while saving room.');
     } finally {
       setSubmitting(false);
     }
@@ -103,26 +121,39 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
   if (moduleName === 'Rooms') {
     return (
       <div className="module-container">
-        {error && <div className="error-banner"><strong>Database Error:</strong> {error}</div>}
+        {error && <div className="error-banner"><strong>Error:</strong> {error}</div>}
         {notice && <div className="success-banner">{notice}</div>}
 
         <div className="module-header-actions">
           <div className="info-badge">
-            <span>🛏️ Rooms Module (Database Backed via RLS)</span>
+            <span>🛏️ Rooms Management (RLS Enforced)</span>
           </div>
-          <button onClick={() => setModalOpen(true)} className="primary">
-            + Add New Room
-          </button>
+          {canManageRooms ? (
+            <button
+              onClick={() => {
+                if (!hotelId) {
+                  setError('Please select an active hotel before adding rooms.');
+                  return;
+                }
+                setModalOpen(true);
+              }}
+              className="primary"
+            >
+              + Add New Room
+            </button>
+          ) : (
+            <span className="text-muted">Read-only role ({userRole})</span>
+          )}
         </div>
 
-        {modalOpen && (
+        {modalOpen && hotelId && (
           <div className="modal-overlay">
             <div className="modal-content">
               <h3>Add New Hotel Room</h3>
-              <p className="modal-sub">Enforces unique room number per hotel and RLS write policies.</p>
+              <p className="modal-sub">Enforces unique room number and RLS write policies.</p>
               <form onSubmit={handleCreateRoom} className="modal-form">
                 <div className="form-field">
-                  <label>Room Number / Name *</label>
+                  <label>Room Number *</label>
                   <input
                     type="text"
                     required
@@ -170,8 +201,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
 
         <div className="table-card">
           <div className="table-header">
-            <h2>Configured Hotel Rooms</h2>
-            <span className="badge">{rooms.length} Rooms Found</span>
+            <h2>Rooms for Active Hotel</h2>
+            <span className="badge">{rooms.length} Rooms Loaded</span>
           </div>
 
           <div className="table-responsive">
@@ -186,7 +217,16 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {!hotelId ? (
+                  <tr>
+                    <td colSpan={5} className="empty-table-cell">
+                      <div className="empty-state-box">
+                        <p>No active hotel membership selected.</p>
+                        <small>Please select a hotel from your account settings.</small>
+                      </div>
+                    </td>
+                  </tr>
+                ) : loading ? (
                   <tr>
                     <td colSpan={5} className="empty-table-cell">Loading rooms from database...</td>
                   </tr>
@@ -194,8 +234,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
                   <tr>
                     <td colSpan={5} className="empty-table-cell">
                       <div className="empty-state-box">
-                        <p>No rooms configured in the database yet.</p>
-                        <small>Click "+ Add New Room" above to insert a room record.</small>
+                        <p>No rooms found in database for this hotel.</p>
+                        <small>Click "+ Add New Room" above to create room records.</small>
                       </div>
                     </td>
                   </tr>
@@ -207,7 +247,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
                       <td><span className={`tag ${room.status}`}>{room.status}</span></td>
                       <td><span className="badge clean">{room.housekeeping_status || 'clean'}</span></td>
                       <td>
-                        <button className="table-btn" onClick={() => alert(`Room ${room.room_number} details view.`)}>View</button>
+                        <button className="table-btn" onClick={() => alert(`Viewing Room ${room.room_number}`)}>View</button>
                       </td>
                     </tr>
                   ))
@@ -225,9 +265,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId }) 
       <div className="table-card" style={{ padding: '40px', textAlign: 'center' }}>
         <h2>{moduleName} Module</h2>
         <p className="muted" style={{ margin: '12px 0 20px' }}>
-          This module is scaffolded and awaiting Phase 2 implementation. Database schema migrations are ready.
+          This module is scaffolded and scheduled for implementation in Phase 2. Database migrations are verified.
         </p>
-        <span className="badge">Coming in Phase 2</span>
+        <span className="badge">Phase 2 Scheduled</span>
       </div>
     </div>
   );
