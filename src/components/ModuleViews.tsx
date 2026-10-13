@@ -47,7 +47,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setError(null);
 
     try {
-      // Fetch room types
       const { data: typesData, error: typesError } = await supabase
         .from('room_types')
         .select('*')
@@ -56,7 +55,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       if (typesError) throw typesError;
       setRoomTypes(typesData || []);
 
-      // Fetch rooms with room_types relationship
       const { data: roomsData, error: roomsError } = await supabase
         .from('rooms')
         .select('*, room_type:room_types(*)')
@@ -122,7 +120,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     try {
       const trimmedNum = roomNumber.trim();
 
-      // Client-side case-insensitive duplicate check
       const duplicate = rooms.find(
         r => r.room_number.toLowerCase() === trimmedNum.toLowerCase() && (!editingRoom || r.id !== editingRoom.id)
       );
@@ -168,71 +165,72 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
 
   if (moduleName === 'Rooms') {
     return (
-      <div className="module-container">
-        {error && <div className="error-banner"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="success-banner">{notice}</div>}
+      <div className="module-view-container">
+        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
+        {notice && <div className="alert-banner success">{notice}</div>}
 
-        <div className="module-header-actions">
-          <div className="info-badge">
-            <span>🛏️ Rooms Management (Database Backed & Verified)</span>
+        <div className="module-topbar">
+          <div>
+            <h2>Rooms Inventory</h2>
+            <p className="subtitle">Manage hotel rooms, floor placement, status, and room types.</p>
           </div>
-          {canManageRooms ? (
-            <button onClick={handleOpenAdd} className="primary">
+          {canManageRooms && (
+            <button onClick={handleOpenAdd} className="btn-primary">
               + Add New Room
             </button>
-          ) : (
-            <span className="text-muted">Read-only role ({userRole})</span>
           )}
         </div>
 
         {modalOpen && hotelId && (
-          <div className="modal-overlay">
-            <div className="modal-content">
-              <h3>{editingRoom ? `Edit Room ${editingRoom.room_number}` : 'Add New Hotel Room'}</h3>
-              <p className="modal-sub">Enforces unique room number constraint and RLS policies.</p>
+          <div className="modal-backdrop">
+            <div className="modal-card">
+              <div className="modal-header">
+                <h3>{editingRoom ? `Edit Room ${editingRoom.room_number}` : 'Add New Hotel Room'}</h3>
+                <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
+              </div>
               <form onSubmit={handleSaveRoom} className="modal-form">
-                <div className="form-field">
-                  <label>Room Number *</label>
+                <div className="form-group">
+                  <label>Room Number / Name *</label>
                   <input
                     type="text"
                     required
                     value={roomNumber}
                     onChange={(e) => setRoomNumber(e.target.value)}
-                    placeholder="e.g. 101 or Suite A"
-                    className="form-input"
+                    placeholder="e.g. 101 or Executive Suite"
+                    className="form-control"
                   />
                 </div>
-                <div className="form-field">
+                <div className="form-group">
                   <label>Floor</label>
                   <input
                     type="text"
                     value={roomFloor}
                     onChange={(e) => setRoomFloor(e.target.value)}
                     placeholder="1"
-                    className="form-input"
+                    className="form-control"
                   />
                 </div>
-                <div className="form-field">
+                <div className="form-group">
                   <label>Room Type</label>
                   <select
                     value={roomTypeId}
                     onChange={(e) => setRoomTypeId(e.target.value)}
-                    className="form-input"
+                    className="form-control"
                   >
                     <option value="">-- Select Room Type --</option>
                     {roomTypes.map((rt) => (
                       <option key={rt.id} value={rt.id}>
-                        {rt.name} (Base Rate: UGX {rt.base_rate?.toLocaleString()})
+                        {rt.name} (UGX {rt.base_rate?.toLocaleString()})
                       </option>
                     ))}
                   </select>
                 </div>
-                <div className="form-field">
-                  <label>Status</label>
+                <div className="form-group">
+                  <label>Room Status</label>
                   <select
                     value={roomStatus}
                     onChange={(e) => setRoomStatus(e.target.value as Room['status'])}
-                    className="form-input"
+                    className="form-control"
                   >
                     <option value="available">Available</option>
                     <option value="reserved">Reserved</option>
@@ -242,9 +240,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                     <option value="out_of_service">Out of Service</option>
                   </select>
                 </div>
-                <div className="modal-actions">
-                  <button type="button" onClick={() => setModalOpen(false)} className="secondary">Cancel</button>
-                  <button type="submit" disabled={submitting} className="primary">
+                <div className="modal-footer">
+                  <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                  <button type="submit" disabled={submitting} className="btn-primary">
                     {submitting ? 'Saving...' : editingRoom ? 'Update Room' : 'Save Room'}
                   </button>
                 </div>
@@ -253,43 +251,39 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
           </div>
         )}
 
-        <div className="table-card">
-          <div className="table-header">
-            <h2>Rooms for Active Hotel</h2>
-            <span className="badge">{rooms.length} Rooms Loaded</span>
+        <div className="data-card">
+          <div className="data-card-header">
+            <h3>Active Rooms ({rooms.length})</h3>
+            <span className="tenant-badge">Database Backed (RLS)</span>
           </div>
 
-          <div className="table-responsive">
-            <table className="data-table">
+          <div className="table-wrapper">
+            <table className="pro-table">
               <thead>
                 <tr>
                   <th>Room Number</th>
                   <th>Floor</th>
                   <th>Room Type & Rate</th>
                   <th>Status</th>
-                  <th>Actions</th>
+                  <th>Housekeeping</th>
+                  <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {!hotelId ? (
                   <tr>
-                    <td colSpan={5} className="empty-table-cell">
-                      <div className="empty-state-box">
-                        <p>No active hotel membership selected.</p>
-                        <small>Please select a hotel from your account settings.</small>
-                      </div>
-                    </td>
+                    <td colSpan={6} className="empty-row">No active hotel membership selected.</td>
                   </tr>
                 ) : loading ? (
                   <tr>
-                    <td colSpan={5} className="empty-table-cell">Loading rooms from database...</td>
+                    <td colSpan={6} className="empty-row">Loading rooms from database...</td>
                   </tr>
                 ) : rooms.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="empty-table-cell">
-                      <div className="empty-state-box">
-                        <p>No rooms found in database for this hotel.</p>
-                        <small>Click "+ Add New Room" above to create room records.</small>
+                    <td colSpan={6} className="empty-row">
+                      <div className="empty-state">
+                        <p>No rooms configured for this hotel yet.</p>
+                        <small>Click "+ Add New Room" above to add your first room.</small>
                       </div>
                     </td>
                   </tr>
@@ -301,21 +295,28 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                       <td>
                         {room.room_type ? (
                           <div>
-                            <strong>{room.room_type.name}</strong>
-                            <div style={{ fontSize: '12px', color: '#64748b' }}>
-                              UGX {Number(room.room_type.base_rate).toLocaleString()}
-                            </div>
+                            <span className="room-type-name">{room.room_type.name}</span>
+                            <div className="room-rate">UGX {Number(room.room_type.base_rate).toLocaleString()}</div>
                           </div>
                         ) : (
                           <span className="text-muted">Standard</span>
                         )}
                       </td>
-                      <td><span className={`tag ${room.status}`}>{room.status}</span></td>
                       <td>
+                        <span className={`status-badge ${room.status}`}>
+                          {room.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="housekeeping-badge clean">
+                          {room.housekeeping_status || 'clean'}
+                        </span>
+                      </td>
+                      <td className="text-right">
                         {canManageRooms && (
-                          <button className="table-btn edit" onClick={() => handleOpenEdit(room)}>Edit</button>
+                          <button className="action-link edit" onClick={() => handleOpenEdit(room)}>Edit</button>
                         )}
-                        <button className="table-btn" onClick={() => alert(`Room ${room.room_number} details view.`)}>View</button>
+                        <button className="action-link" onClick={() => alert(`Room ${room.room_number} inspection view.`)}>View</button>
                       </td>
                     </tr>
                   ))
@@ -324,18 +325,82 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             </table>
           </div>
         </div>
+
+        <style>{`
+          .module-view-container { display: flex; flex-direction: column; gap: 24px; }
+          .alert-banner { padding: 14px 18px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+          .alert-banner.error { background: #fff1f0; color: #b42318; border: 1px solid #fecdca; }
+          .alert-banner.success { background: #edfdf4; color: #027a48; border: 1px solid #abefc6; }
+
+          .module-topbar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 24px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+          .module-topbar h2 { margin: 0; font-size: 22px; color: #0f172a; }
+          .subtitle { margin: 4px 0 0; color: #64748b; font-size: 14px; }
+
+          .btn-primary { background: #0f172a; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: background 0.2s; }
+          .btn-primary:hover { background: #1e293b; }
+          .btn-secondary { background: #f1f5f9; color: #475569; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
+          .btn-secondary:hover { background: #e2e8f0; }
+
+          .data-card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+          .data-card-header { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; }
+          .data-card-header h3 { margin: 0; font-size: 16px; color: #0f172a; }
+          .tenant-badge { background: #eff6ff; color: #1d4ed8; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+
+          .table-wrapper { overflow-x: auto; }
+          .pro-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+          .pro-table th { background: #f8fafc; padding: 14px 24px; color: #475569; font-weight: 650; border-bottom: 1px solid #e2e8f0; }
+          .pro-table td { padding: 16px 24px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: middle; }
+          .empty-row { text-align: center; padding: 50px !important; color: #64748b; }
+          .empty-state { display: flex; flex-direction: column; gap: 4px; align-items: center; }
+          .empty-state p { margin: 0; font-size: 15px; font-weight: 600; color: #0f172a; }
+          .empty-state small { color: #64748b; }
+
+          .room-type-name { font-weight: 600; color: #0f172a; }
+          .room-rate { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+          .status-badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+          .status-badge.available { background: #dcfce7; color: #15803d; }
+          .status-badge.occupied { background: #e0f2fe; color: #0369a1; }
+          .status-badge.reserved { background: #fef3c7; color: #b45309; }
+          .status-badge.cleaning { background: #f3e8ff; color: #7e22ce; }
+          .status-badge.maintenance, .status-badge.out_of_service { background: #fee2e2; color: #b91c1c; }
+
+          .housekeeping-badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #f1f5f9; color: #475569; }
+
+          .text-right { text-align: right; }
+          .action-link { background: none; border: none; color: #2563eb; font-weight: 600; font-size: 13px; cursor: pointer; padding: 4px 8px; }
+          .action-link:hover { text-decoration: underline; }
+          .action-link.edit { color: #0d9488; }
+
+          .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 1000; padding: 20px; }
+          .modal-card { background: white; border-radius: 16px; width: 100%; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); overflow: hidden; animation: modalPop 0.2s ease-out; }
+          @keyframes modalPop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+          .modal-header { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; background: #f8fafc; }
+          .modal-header h3 { margin: 0; font-size: 18px; color: #0f172a; }
+          .modal-close { background: none; border: none; font-size: 24px; color: #64748b; cursor: pointer; }
+          .modal-sub { font-size: 13px; color: #64748b; margin: 4px 0 16px; padding: 0 24px; }
+
+          .modal-form { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+          .form-group { display: flex; flex-direction: column; gap: 6px; }
+          .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
+          .form-control { padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; outline: none; background: white; color: #0f172a; transition: border-color 0.2s, box-shadow 0.2s; }
+          .form-control:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+
+          .modal-footer { padding: 16px 24px; background: #f8fafc; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 10px; }
+        `}</style>
       </div>
     );
   }
 
   return (
     <div className="module-container">
-      <div className="table-card" style={{ padding: '40px', textAlign: 'center' }}>
+      <div className="data-card" style={{ padding: '60px 20px', textAlign: 'center' }}>
         <h2>{moduleName} Module</h2>
-        <p className="muted" style={{ margin: '12px 0 20px' }}>
+        <p className="subtitle" style={{ margin: '8px 0 20px' }}>
           This module is scaffolded and scheduled for implementation in Phase 2. Database migrations are verified.
         </p>
-        <span className="badge">Phase 2 Scheduled</span>
+        <span className="tenant-badge">Phase 2 Scheduled</span>
       </div>
     </div>
   );
