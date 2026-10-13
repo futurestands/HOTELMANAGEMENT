@@ -54,6 +54,7 @@ export interface Room {
   floor?: string;
   status: 'available' | 'reserved' | 'occupied' | 'cleaning' | 'maintenance' | 'out_of_service';
   housekeeping_status?: 'clean' | 'dirty' | 'inspecting';
+  room_type?: RoomType;
 }
 
 export interface Guest {
@@ -103,7 +104,6 @@ export interface StockItem {
   unit_cost: number;
 }
 
-// Role permission mapping helper
 export function getModulesForRole(role: UserRole): string[] {
   switch (role) {
     case 'platform_admin':
