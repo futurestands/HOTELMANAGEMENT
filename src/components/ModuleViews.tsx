@@ -14,8 +14,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
 
-  // New Room Form State
+  // Room Form State
   const [roomNumber, setRoomNumber] = useState('');
   const [roomFloor, setRoomFloor] = useState('1');
   const [roomStatus, setRoomStatus] = useState<Room['status']>('available');
@@ -37,7 +38,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
 
   const fetchRooms = async (targetHotelId: string) => {
     if (!supabase) {
-      setError('Supabase client is not configured. Cannot load database records.');
+      setError('Supabase client is not configured.');
       return;
     }
     setLoading(true);
@@ -53,13 +54,35 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       if (fetchError) throw fetchError;
       setRooms(data || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch rooms from database.');
+      setError(err.message || 'Failed to fetch rooms.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCreateRoom = async (e: React.FormEvent) => {
+  const handleOpenAdd = () => {
+    if (!hotelId) {
+      setError('Please select an active hotel before adding rooms.');
+      return;
+    }
+    setEditingRoom(null);
+    setRoomNumber('');
+    setRoomFloor('1');
+    setRoomStatus('available');
+    setError(null);
+    setModalOpen(true);
+  };
+
+  const handleOpenEdit = (room: Room) => {
+    setEditingRoom(room);
+    setRoomNumber(room.room_number);
+    setRoomFloor(room.floor || '1');
+    setRoomStatus(room.status);
+    setError(null);
+    setModalOpen(true);
+  };
+
+  const handleSaveRoom = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase) {
       setError('Supabase is not configured.');
@@ -83,33 +106,49 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setNotice(null);
 
     try {
-      // Client-side case-insensitive duplicate check
       const trimmedNum = roomNumber.trim();
-      const duplicate = rooms.find(r => r.room_number.toLowerCase() === trimmedNum.toLowerCase());
+
+      // Check duplicates (excluding current editing room)
+      const duplicate = rooms.find(
+        r => r.room_number.toLowerCase() === trimmedNum.toLowerCase() && (!editingRoom || r.id !== editingRoom.id)
+      );
       if (duplicate) {
         throw new Error(`Room number "${trimmedNum}" already exists in this hotel.`);
       }
 
-      const payload = {
-        hotel_id: hotelId,
-        room_number: trimmedNum,
-        floor: roomFloor.trim(),
-        status: roomStatus,
-        housekeeping_status: 'clean'
-      };
+      if (editingRoom) {
+        // Update existing room
+        const { error: updateError } = await supabase
+          .from('rooms')
+          .update({
+            room_number: trimmedNum,
+            floor: roomFloor.trim(),
+            status: roomStatus
+          })
+          .eq('id', editingRoom.id)
+          .eq('hotel_id', hotelId);
 
-      const { data, error: insertError } = await supabase
-        .from('rooms')
-        .insert([payload])
-        .select()
-        .single();
+        if (updateError) throw updateError;
+        setNotice(`Room "${trimmedNum}" updated successfully.`);
+      } else {
+        // Insert new room
+        const payload = {
+          hotel_id: hotelId,
+          room_number: trimmedNum,
+          floor: roomFloor.trim(),
+          status: roomStatus,
+          housekeeping_status: 'clean'
+        };
 
-      if (insertError) throw insertError;
+        const { error: insertError } = await supabase
+          .from('rooms')
+          .insert([payload]);
 
-      setNotice(`Room "${data.room_number}" successfully created and persisted.`);
+        if (insertError) throw insertError;
+        setNotice(`Room "${trimmedNum}" created successfully.`);
+      }
+
       setModalOpen(false);
-      setRoomNumber('');
-      setRoomFloor('1');
       await fetchRooms(hotelId);
     } catch (err: any) {
       setError(err.message || 'Database error occurred while saving room.');
@@ -126,19 +165,10 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
 
         <div className="module-header-actions">
           <div className="info-badge">
-            <span>🛏️ Rooms Management (RLS Enforced)</span>
+            <span>🛏️ Rooms Management (Database Backed)</span>
           </div>
           {canManageRooms ? (
-            <button
-              onClick={() => {
-                if (!hotelId) {
-                  setError('Please select an active hotel before adding rooms.');
-                  return;
-                }
-                setModalOpen(true);
-              }}
-              className="primary"
-            >
+            <button onClick={handleOpenAdd} className="primary">
               + Add New Room
             </button>
           ) : (
@@ -149,9 +179,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         {modalOpen && hotelId && (
           <div className="modal-overlay">
             <div className="modal-content">
-              <h3>Add New Hotel Room</h3>
-              <p className="modal-sub">Enforces unique room number and RLS write policies.</p>
-              <form onSubmit={handleCreateRoom} className="modal-form">
+              <h3>{editingRoom ? `Edit Room ${editingRoom.room_number}` : 'Add New Hotel Room'}</h3>
+              <p className="modal-sub">Enforces unique room number and RLS policies.</p>
+              <form onSubmit={handleSaveRoom} className="modal-form">
                 <div className="form-field">
                   <label>Room Number *</label>
                   <input
@@ -174,7 +204,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                   />
                 </div>
                 <div className="form-field">
-                  <label>Initial Status</label>
+                  <label>Status</label>
                   <select
                     value={roomStatus}
                     onChange={(e) => setRoomStatus(e.target.value as Room['status'])}
@@ -191,7 +221,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 <div className="modal-actions">
                   <button type="button" onClick={() => setModalOpen(false)} className="secondary">Cancel</button>
                   <button type="submit" disabled={submitting} className="primary">
-                    {submitting ? 'Saving...' : 'Save Room'}
+                    {submitting ? 'Saving...' : editingRoom ? 'Update Room' : 'Save Room'}
                   </button>
                 </div>
               </form>
@@ -247,7 +277,10 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                       <td><span className={`tag ${room.status}`}>{room.status}</span></td>
                       <td><span className="badge clean">{room.housekeeping_status || 'clean'}</span></td>
                       <td>
-                        <button className="table-btn" onClick={() => alert(`Viewing Room ${room.room_number}`)}>View</button>
+                        {canManageRooms && (
+                          <button className="table-btn edit" onClick={() => handleOpenEdit(room)}>Edit</button>
+                        )}
+                        <button className="table-btn" onClick={() => alert(`Room ${room.room_number} details view.`)}>View</button>
                       </td>
                     </tr>
                   ))

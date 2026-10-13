@@ -24,7 +24,7 @@ const allModules: Module[] = [
 function App() {
   const [active, setActive] = useState("Dashboard");
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
-  const [userRole, setUserRole] = useState<UserRole>("owner");
+  const [userRole, setUserRole] = useState<UserRole | undefined>(undefined);
   const [hotelName, setHotelName] = useState<string>("Select Hotel");
   const [hotelId, setHotelId] = useState<string | undefined>(undefined);
   const [memberships, setMemberships] = useState<HotelMembership[]>([]);
@@ -59,6 +59,7 @@ function App() {
         loadUserMemberships(session.user.id);
       } else {
         setHotelId(undefined);
+        setUserRole(undefined);
         setMemberships([]);
         setLoadingSession(false);
         setDbStatus("Awaiting Authentication");
@@ -83,6 +84,7 @@ function App() {
       if (!data || data.length === 0) {
         setMemberships([]);
         setHotelId(undefined);
+        setUserRole(undefined);
         setHotelName("No Hotel Membership");
         setDbStatus("Connected (No active hotel memberships found)");
       } else {
@@ -104,7 +106,6 @@ function App() {
         }));
 
         setMemberships(mapped);
-        // Default to first membership
         const primary = mapped[0];
         setHotelId(primary.hotel_id);
         setUserRole(primary.role);
@@ -137,10 +138,11 @@ function App() {
     }
     setIsAuthenticated(false);
     setHotelId(undefined);
+    setUserRole(undefined);
     setMemberships([]);
   };
 
-  const allowedModuleNames = getModulesForRole(userRole);
+  const allowedModuleNames = userRole ? getModulesForRole(userRole) : [];
   const visibleModules = allModules.filter((m) => allowedModuleNames.includes(m.name));
 
   if (loadingSession) {
@@ -185,7 +187,7 @@ function App() {
               >
                 {memberships.map((m) => (
                   <option key={m.hotel_id} value={m.hotel_id}>
-                    {m.hotel?.name || 'Hotel'} ({m.role.toUpperCase()})
+                    {m.hotel?.name || 'Hotel'} ({m.role?.toUpperCase()})
                   </option>
                 ))}
               </select>
@@ -196,9 +198,9 @@ function App() {
         </div>
         <div className="user-area">
           <span className="status-dot" />
-          <span className="role-badge">{userRole.toUpperCase()}</span>
+          <span className="role-badge">{userRole ? userRole.toUpperCase() : 'UNASSIGNED'}</span>
           <button className="avatar" title="Sign out" onClick={handleSignOut}>
-            {userRole[0].toUpperCase()}
+            {userRole ? userRole[0].toUpperCase() : '?'}
           </button>
         </div>
       </header>
@@ -226,7 +228,7 @@ function App() {
         <main className="content">
           <div className="page-heading">
             <div>
-              <p className="eyebrow">{userRole.toUpperCase()} VIEW</p>
+              <p className="eyebrow">{userRole ? userRole.toUpperCase() : 'UNASSIGNED'} VIEW</p>
               <h1>{active}</h1>
               <p className="muted">
                 {active === "Dashboard"
@@ -234,9 +236,11 @@ function App() {
                   : `Managing ${active} module with secure RLS policies and role verification.`}
               </p>
             </div>
-            <button className="primary" onClick={() => setActive(active)}>
-              + New {active === "Dashboard" ? "Reservation" : active.slice(0, -1)}
-            </button>
+            {active === "Dashboard" ? null : (
+              <button className="primary" onClick={() => setActive(active)}>
+                + New {active.slice(0, -1)}
+              </button>
+            )}
           </div>
 
           {active === "Dashboard" ? (
@@ -244,19 +248,19 @@ function App() {
               <section className="cards">
                 <Metric title="Active Hotel ID" value={hotelId ? hotelId.slice(0, 8) + '...' : 'None'} note="Tenant scoped" />
                 <Metric title="Database Security" value="RLS Enforced" note="Policies active" />
-                <Metric title="Assigned Role" value={userRole} note="Permission checked" />
+                <Metric title="Assigned Role" value={userRole || 'None'} note="Permission checked" />
                 <Metric title="Auth Status" value={isAuthenticated ? "Authenticated" : "Unauthenticated"} note="Supabase secure" />
               </section>
 
               <section className="grid-two">
                 <div className="panel">
                   <div className="panel-head">
-                    <h2>Phase 1C Status</h2>
-                    <span className="tag success">Verified</span>
+                    <h2>Phase 1D Status</h2>
+                    <span className="tag success">Complete</span>
                   </div>
                   <div className="operation-row">
                     <span>Rooms Module</span>
-                    <strong>Fully Database Backed</strong>
+                    <strong>Fully Database Backed & Editable</strong>
                   </div>
                   <div className="operation-row">
                     <span>Multi-Hotel Selector</span>
@@ -275,7 +279,7 @@ function App() {
                   </div>
                   <Alert text={`Database status: ${dbStatus}`} />
                   <Alert text="PostgreSQL Row Level Security (RLS) policies prevent cross-hotel access." />
-                  <Alert text="Room number uniqueness is enforced via database unique indexing." />
+                  <Alert text="Room number uniqueness is enforced via database unique indexing (hotel_id, lower(room_number))." />
                 </div>
               </section>
             </>
@@ -292,30 +296,16 @@ function App() {
         >
           ⌂<small>Home</small>
         </button>
-        <button
-          onClick={() => setActive("Reservations")}
-          className={active === "Reservations" ? "active" : ""}
-        >
-          📅<small>Bookings</small>
-        </button>
-        <button
-          onClick={() => setActive("Cashier")}
-          className={active === "Cashier" ? "active" : ""}
-        >
-          💳<small>Cashier</small>
-        </button>
-        <button
-          onClick={() => setActive("Rooms")}
-          className={active === "Rooms" ? "active" : ""}
-        >
-          🛏️<small>Rooms</small>
-        </button>
-        <button
-          onClick={() => setActive("Settings")}
-          className={active === "Settings" ? "active" : ""}
-        >
-          ☰<small>More</small>
-        </button>
+        {visibleModules.slice(0, 4).map((m) => (
+          <button
+            key={m.name}
+            onClick={() => setActive(m.name)}
+            className={active === m.name ? "active" : ""}
+          >
+            <span>{m.icon}</span>
+            <small>{m.name}</small>
+          </button>
+        ))}
       </nav>
     </div>
   );
