@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Room, RoomType, UserRole } from '../types/hotel';
+import { Room, RoomType, Guest, Reservation, UserRole } from '../types/hotel';
 
 interface ModuleViewProps {
   moduleName: string;
@@ -11,125 +11,94 @@ interface ModuleViewProps {
 export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, userRole }) => {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
+  const [guests, setGuests] = useState<Guest[]>([]);
+  const [reservations, setReservations] = useState<Reservation[]>([]);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
 
   // Room Form State
+  const [editingRoom, setEditingRoom] = useState<Room | null>(null);
   const [roomNumber, setRoomNumber] = useState('');
   const [roomFloor, setRoomFloor] = useState('1');
   const [roomTypeId, setRoomTypeId] = useState<string>('');
   const [roomStatus, setRoomStatus] = useState<Room['status']>('available');
+
+  // Guest Form State
+  const [guestName, setGuestName] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
+  const [guestIdNum, setGuestIdNum] = useState('');
+
+  // Reservation Form State
+  const [resGuestId, setResGuestId] = useState('');
+  const [resRoomId, setResRoomId] = useState('');
+  const [resCheckIn, setResCheckIn] = useState('');
+  const [resCheckOut, setResCheckOut] = useState('');
+  const [resAdults, setResAdults] = useState('1');
+  const [resRate, setResRate] = useState('150000');
+
   const [submitting, setSubmitting] = useState(false);
 
-  const canManageRooms = ['owner', 'administrator', 'manager', 'receptionist'].includes(userRole || '');
+  const canManage = ['owner', 'administrator', 'manager', 'receptionist'].includes(userRole || '');
 
   useEffect(() => {
+    if (!hotelId) return;
     if (moduleName === 'Rooms') {
-      if (!hotelId) {
-        setRooms([]);
-        setLoading(false);
-        setError('No active hotel selected. Please select a valid hotel membership.');
-        return;
-      }
       fetchRoomsAndTypes(hotelId);
+    } else if (moduleName === 'Reservations') {
+      fetchReservationsAndFixtures(hotelId);
     }
   }, [moduleName, hotelId]);
 
   const fetchRoomsAndTypes = async (targetHotelId: string) => {
-    if (!supabase) {
-      setError('Supabase client is not configured.');
-      return;
-    }
+    if (!supabase) return;
     setLoading(true);
     setError(null);
-
     try {
-      const { data: typesData, error: typesError } = await supabase
-        .from('room_types')
-        .select('*')
-        .eq('hotel_id', targetHotelId);
-
-      if (typesError) throw typesError;
+      const { data: typesData } = await supabase.from('room_types').select('*').eq('hotel_id', targetHotelId);
       setRoomTypes(typesData || []);
 
-      const { data: roomsData, error: roomsError } = await supabase
-        .from('rooms')
-        .select('*, room_type:room_types(*)')
-        .eq('hotel_id', targetHotelId)
-        .order('room_number', { ascending: true });
-
-      if (roomsError) throw roomsError;
+      const { data: roomsData } = await supabase.from('rooms').select('*, room_type:room_types(*)').eq('hotel_id', targetHotelId).order('room_number');
       setRooms(roomsData || []);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch rooms and room types.');
+      setError(err.message || 'Failed to fetch rooms.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleOpenAdd = () => {
-    if (!hotelId) {
-      setError('Please select an active hotel before adding rooms.');
-      return;
-    }
-    setEditingRoom(null);
-    setRoomNumber('');
-    setRoomFloor('1');
-    setRoomTypeId(roomTypes.length > 0 ? roomTypes[0].id : '');
-    setRoomStatus('available');
+  const fetchReservationsAndFixtures = async (targetHotelId: string) => {
+    if (!supabase) return;
+    setLoading(true);
     setError(null);
-    setModalOpen(true);
-  };
+    try {
+      const { data: gData } = await supabase.from('guests').select('*').eq('hotel_id', targetHotelId);
+      setGuests(gData || []);
 
-  const handleOpenEdit = (room: Room) => {
-    setEditingRoom(room);
-    setRoomNumber(room.room_number);
-    setRoomFloor(room.floor || '1');
-    setRoomTypeId(room.room_type_id || (roomTypes.length > 0 ? roomTypes[0].id : ''));
-    setRoomStatus(room.status);
-    setError(null);
-    setModalOpen(true);
+      const { data: rData } = await supabase.from('rooms').select('*').eq('hotel_id', targetHotelId);
+      setRooms(rData || []);
+
+      const { data: resData } = await supabase.from('reservations').select('*, guest:guests(*), room:rooms(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
+      setReservations(resData || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch reservations.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveRoom = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!supabase) {
-      setError('Supabase is not configured.');
-      return;
-    }
-    if (!hotelId) {
-      setError('No active hotel selected.');
-      return;
-    }
-    if (!roomNumber.trim()) {
-      setError('Room number is required.');
-      return;
-    }
-    if (!canManageRooms) {
-      setError('You do not have permission to manage rooms.');
-      return;
-    }
-
+    if (!supabase || !hotelId) return;
     setSubmitting(true);
     setError(null);
-    setNotice(null);
-
     try {
-      const trimmedNum = roomNumber.trim();
-
-      const duplicate = rooms.find(
-        r => r.room_number.toLowerCase() === trimmedNum.toLowerCase() && (!editingRoom || r.id !== editingRoom.id)
-      );
-      if (duplicate) {
-        throw new Error(`Room number "${trimmedNum}" already exists in this hotel.`);
-      }
-
       const payload = {
         hotel_id: hotelId,
-        room_number: trimmedNum,
+        room_number: roomNumber.trim(),
         floor: roomFloor.trim(),
         room_type_id: roomTypeId || null,
         status: roomStatus,
@@ -137,27 +106,70 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       };
 
       if (editingRoom) {
-        const { error: updateError } = await supabase
-          .from('rooms')
-          .update(payload)
-          .eq('id', editingRoom.id)
-          .eq('hotel_id', hotelId);
-
-        if (updateError) throw updateError;
-        setNotice(`Room "${trimmedNum}" updated successfully.`);
+        const { error: updErr } = await supabase.from('rooms').update(payload).eq('id', editingRoom.id);
+        if (updErr) throw updErr;
+        setNotice(`Room "${roomNumber}" updated successfully.`);
       } else {
-        const { error: insertError } = await supabase
-          .from('rooms')
-          .insert([payload]);
-
-        if (insertError) throw insertError;
-        setNotice(`Room "${trimmedNum}" created successfully.`);
+        const { error: insErr } = await supabase.from('rooms').insert([payload]);
+        if (insErr) throw insErr;
+        setNotice(`Room "${roomNumber}" created successfully.`);
       }
-
       setModalOpen(false);
       await fetchRoomsAndTypes(hotelId);
     } catch (err: any) {
-      setError(err.message || 'Database error occurred while saving room.');
+      setError(err.message || 'Failed to save room.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveGuest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !hotelId) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { error: insErr } = await supabase.from('guests').insert([{
+        hotel_id: hotelId,
+        full_name: guestName.trim(),
+        email: guestEmail.trim() || null,
+        phone: guestPhone.trim() || null,
+        id_number: guestIdNum.trim() || null
+      }]);
+      if (insErr) throw insErr;
+      setNotice(`Guest "${guestName}" added successfully.`);
+      setModalOpen(false);
+      setGuestName(''); setGuestEmail(''); setGuestPhone(''); setGuestIdNum('');
+      await fetchReservationsAndFixtures(hotelId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save guest.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveReservation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !hotelId) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const { error: insErr } = await supabase.from('reservations').insert([{
+        hotel_id: hotelId,
+        guest_id: resGuestId,
+        room_id: resRoomId,
+        check_in_date: resCheckIn,
+        check_out_date: resCheckOut,
+        adults: parseInt(resAdults) || 1,
+        agreed_rate: parseFloat(resRate) || 0,
+        status: 'confirmed'
+      }]);
+      if (insErr) throw insErr;
+      setNotice('Reservation booked successfully.');
+      setModalOpen(false);
+      await fetchReservationsAndFixtures(hotelId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to book reservation.');
     } finally {
       setSubmitting(false);
     }
@@ -174,14 +186,14 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             <h2>Rooms Inventory</h2>
             <p className="subtitle">Manage hotel rooms, floor placement, status, and room types.</p>
           </div>
-          {canManageRooms && (
-            <button onClick={handleOpenAdd} className="btn-primary">
+          {canManage && (
+            <button onClick={() => { setEditingRoom(null); setRoomNumber(''); setModalOpen(true); }} className="btn-primary">
               + Add New Room
             </button>
           )}
         </div>
 
-        {modalOpen && hotelId && (
+        {modalOpen && (
           <div className="modal-backdrop">
             <div className="modal-card">
               <div className="modal-header">
@@ -191,47 +203,24 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
               <form onSubmit={handleSaveRoom} className="modal-form">
                 <div className="form-group">
                   <label>Room Number / Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={roomNumber}
-                    onChange={(e) => setRoomNumber(e.target.value)}
-                    placeholder="e.g. 101 or Executive Suite"
-                    className="form-control"
-                  />
+                  <input type="text" required value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 101" className="form-control" />
                 </div>
                 <div className="form-group">
                   <label>Floor</label>
-                  <input
-                    type="text"
-                    value={roomFloor}
-                    onChange={(e) => setRoomFloor(e.target.value)}
-                    placeholder="1"
-                    className="form-control"
-                  />
+                  <input type="text" value={roomFloor} onChange={(e) => setRoomFloor(e.target.value)} placeholder="1" className="form-control" />
                 </div>
                 <div className="form-group">
                   <label>Room Type</label>
-                  <select
-                    value={roomTypeId}
-                    onChange={(e) => setRoomTypeId(e.target.value)}
-                    className="form-control"
-                  >
+                  <select value={roomTypeId} onChange={(e) => setRoomTypeId(e.target.value)} className="form-control">
                     <option value="">-- Select Room Type --</option>
                     {roomTypes.map((rt) => (
-                      <option key={rt.id} value={rt.id}>
-                        {rt.name} (UGX {rt.base_rate?.toLocaleString()})
-                      </option>
+                      <option key={rt.id} value={rt.id}>{rt.name} (UGX {rt.base_rate?.toLocaleString()})</option>
                     ))}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Room Status</label>
-                  <select
-                    value={roomStatus}
-                    onChange={(e) => setRoomStatus(e.target.value as Room['status'])}
-                    className="form-control"
-                  >
+                  <label>Status</label>
+                  <select value={roomStatus} onChange={(e) => setRoomStatus(e.target.value as Room['status'])} className="form-control">
                     <option value="available">Available</option>
                     <option value="reserved">Reserved</option>
                     <option value="occupied">Occupied</option>
@@ -242,9 +231,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 </div>
                 <div className="modal-footer">
                   <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
-                  <button type="submit" disabled={submitting} className="btn-primary">
-                    {submitting ? 'Saving...' : editingRoom ? 'Update Room' : 'Save Room'}
-                  </button>
+                  <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Room'}</button>
                 </div>
               </form>
             </div>
@@ -256,7 +243,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             <h3>Active Rooms ({rooms.length})</h3>
             <span className="tenant-badge">Database Backed (RLS)</span>
           </div>
-
           <div className="table-wrapper">
             <table className="pro-table">
               <thead>
@@ -265,28 +251,14 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                   <th>Floor</th>
                   <th>Room Type & Rate</th>
                   <th>Status</th>
-                  <th>Housekeeping</th>
                   <th className="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {!hotelId ? (
-                  <tr>
-                    <td colSpan={6} className="empty-row">No active hotel membership selected.</td>
-                  </tr>
-                ) : loading ? (
-                  <tr>
-                    <td colSpan={6} className="empty-row">Loading rooms from database...</td>
-                  </tr>
+                {loading ? (
+                  <tr><td colSpan={5} className="empty-row">Loading rooms...</td></tr>
                 ) : rooms.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="empty-row">
-                      <div className="empty-state">
-                        <p>No rooms configured for this hotel yet.</p>
-                        <small>Click "+ Add New Room" above to add your first room.</small>
-                      </div>
-                    </td>
-                  </tr>
+                  <tr><td colSpan={5} className="empty-row">No rooms configured yet.</td></tr>
                 ) : (
                   rooms.map((room) => (
                     <tr key={room.id}>
@@ -298,25 +270,11 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                             <span className="room-type-name">{room.room_type.name}</span>
                             <div className="room-rate">UGX {Number(room.room_type.base_rate).toLocaleString()}</div>
                           </div>
-                        ) : (
-                          <span className="text-muted">Standard</span>
-                        )}
+                        ) : <span className="text-muted">Standard</span>}
                       </td>
-                      <td>
-                        <span className={`status-badge ${room.status}`}>
-                          {room.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td>
-                        <span className="housekeeping-badge clean">
-                          {room.housekeeping_status || 'clean'}
-                        </span>
-                      </td>
+                      <td><span className={`status-badge ${room.status}`}>{room.status.replace('_', ' ')}</span></td>
                       <td className="text-right">
-                        {canManageRooms && (
-                          <button className="action-link edit" onClick={() => handleOpenEdit(room)}>Edit</button>
-                        )}
-                        <button className="action-link" onClick={() => alert(`Room ${room.room_number} inspection view.`)}>View</button>
+                        {canManage && <button className="action-link edit" onClick={() => { setEditingRoom(room); setRoomNumber(room.room_number); setRoomFloor(room.floor || '1'); setRoomTypeId(room.room_type_id || ''); setRoomStatus(room.status); setModalOpen(true); }}>Edit</button>}
                       </td>
                     </tr>
                   ))
@@ -325,70 +283,165 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             </table>
           </div>
         </div>
+      </div>
+    );
+  }
 
-        <style>{`
-          .module-view-container { display: flex; flex-direction: column; gap: 24px; }
-          .alert-banner { padding: 14px 18px; border-radius: 10px; font-weight: 600; font-size: 14px; }
-          .alert-banner.error { background: #fff1f0; color: #b42318; border: 1px solid #fecdca; }
-          .alert-banner.success { background: #edfdf4; color: #027a48; border: 1px solid #abefc6; }
+  if (moduleName === 'Reservations') {
+    const [subModal, setSubModal] = useState<'guest' | 'reservation'>('reservation');
 
-          .module-topbar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 24px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
-          .module-topbar h2 { margin: 0; font-size: 22px; color: #0f172a; }
-          .subtitle { margin: 4px 0 0; color: #64748b; font-size: 14px; }
+    return (
+      <div className="module-view-container">
+        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
+        {notice && <div className="alert-banner success">{notice}</div>}
 
-          .btn-primary { background: #0f172a; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: background 0.2s; }
-          .btn-primary:hover { background: #1e293b; }
-          .btn-secondary { background: #f1f5f9; color: #475569; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
-          .btn-secondary:hover { background: #e2e8f0; }
+        <div className="module-topbar">
+          <div>
+            <h2>Reservations & Guests</h2>
+            <p className="subtitle">Manage guest records, bookings, check-in, and availability.</p>
+          </div>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={() => { setSubModal('guest'); setModalOpen(true); }} className="btn-secondary">+ Add Guest</button>
+            <button onClick={() => { setSubModal('reservation'); setModalOpen(true); }} className="btn-primary">+ New Booking</button>
+          </div>
+        </div>
 
-          .data-card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
-          .data-card-header { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; }
-          .data-card-header h3 { margin: 0; font-size: 16px; color: #0f172a; }
-          .tenant-badge { background: #eff6ff; color: #1d4ed8; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+        {modalOpen && (
+          <div className="modal-backdrop">
+            <div className="modal-card">
+              <div className="modal-header">
+                <h3>{subModal === 'guest' ? 'Register New Guest' : 'New Reservation Booking'}</h3>
+                <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
+              </div>
 
-          .table-wrapper { overflow-x: auto; }
-          .pro-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
-          .pro-table th { background: #f8fafc; padding: 14px 24px; color: #475569; font-weight: 650; border-bottom: 1px solid #e2e8f0; }
-          .pro-table td { padding: 16px 24px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: middle; }
-          .empty-row { text-align: center; padding: 50px !important; color: #64748b; }
-          .empty-state { display: flex; flex-direction: column; gap: 4px; align-items: center; }
-          .empty-state p { margin: 0; font-size: 15px; font-weight: 600; color: #0f172a; }
-          .empty-state small { color: #64748b; }
+              {subModal === 'guest' ? (
+                <form onSubmit={handleSaveGuest} className="modal-form">
+                  <div className="form-group">
+                    <label>Full Name *</label>
+                    <input type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="John Doe" className="form-control" />
+                  </div>
+                  <div className="form-group">
+                    <label>Email</label>
+                    <input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} placeholder="john@example.com" className="form-control" />
+                  </div>
+                  <div className="form-group">
+                    <label>Phone</label>
+                    <input type="text" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} placeholder="+256..." className="form-control" />
+                  </div>
+                  <div className="form-group">
+                    <label>ID / Passport Number</label>
+                    <input type="text" value={guestIdNum} onChange={(e) => setGuestIdNum(e.target.value)} placeholder="CM..." className="form-control" />
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                    <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Guest'}</button>
+                  </div>
+                </form>
+              ) : (
+                <form onSubmit={handleSaveReservation} className="modal-form">
+                  <div className="form-group">
+                    <label>Select Guest *</label>
+                    <select required value={resGuestId} onChange={(e) => setResGuestId(e.target.value)} className="form-control">
+                      <option value="">-- Choose Guest --</option>
+                      {guests.map((g) => <option key={g.id} value={g.id}>{g.full_name} ({g.phone || 'No phone'})</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Select Room *</label>
+                    <select required value={resRoomId} onChange={(e) => setResRoomId(e.target.value)} className="form-control">
+                      <option value="">-- Choose Room --</option>
+                      {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number} ({r.status})</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label>Check-in Date *</label>
+                    <input type="date" required value={resCheckIn} onChange={(e) => setResCheckIn(e.target.value)} className="form-control" />
+                  </div>
+                  <div className="form-group">
+                    <label>Check-out Date *</label>
+                    <input type="date" required value={resCheckOut} onChange={(e) => setResCheckOut(e.target.value)} className="form-control" />
+                  </div>
+                  <div className="form-group">
+                    <label>Agreed Rate (UGX) *</label>
+                    <input type="number" required value={resRate} onChange={(e) => setResRate(e.target.value)} className="form-control" />
+                  </div>
+                  <div className="modal-footer">
+                    <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                    <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Booking...' : 'Confirm Booking'}</button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
 
-          .room-type-name { font-weight: 600; color: #0f172a; }
-          .room-rate { font-size: 12px; color: #64748b; margin-top: 2px; }
+        <div className="data-card" style={{ marginBottom: '24px' }}>
+          <div className="data-card-header">
+            <h3>Active Bookings ({reservations.length})</h3>
+            <span className="tenant-badge">Database Backed</span>
+          </div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead>
+                <tr>
+                  <th>Guest</th>
+                  <th>Room</th>
+                  <th>Dates</th>
+                  <th>Rate</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reservations.length === 0 ? (
+                  <tr><td colSpan={5} className="empty-row">No reservations found. Click "+ New Booking" to create one.</td></tr>
+                ) : (
+                  reservations.map((res: any) => (
+                    <tr key={res.id}>
+                      <td><strong>{res.guest?.full_name || 'Guest'}</strong></td>
+                      <td>Room {res.room?.room_number || 'N/A'}</td>
+                      <td>{res.check_in_date} to {res.check_out_date}</td>
+                      <td>UGX {Number(res.agreed_rate).toLocaleString()}</td>
+                      <td><span className={`status-badge ${res.status}`}>{res.status}</span></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-          .status-badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
-          .status-badge.available { background: #dcfce7; color: #15803d; }
-          .status-badge.occupied { background: #e0f2fe; color: #0369a1; }
-          .status-badge.reserved { background: #fef3c7; color: #b45309; }
-          .status-badge.cleaning { background: #f3e8ff; color: #7e22ce; }
-          .status-badge.maintenance, .status-badge.out_of_service { background: #fee2e2; color: #b91c1c; }
-
-          .housekeeping-badge { display: inline-block; padding: 4px 8px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #f1f5f9; color: #475569; }
-
-          .text-right { text-align: right; }
-          .action-link { background: none; border: none; color: #2563eb; font-weight: 600; font-size: 13px; cursor: pointer; padding: 4px 8px; }
-          .action-link:hover { text-decoration: underline; }
-          .action-link.edit { color: #0d9488; }
-
-          .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 1000; padding: 20px; }
-          .modal-card { background: white; border-radius: 16px; width: 100%; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); overflow: hidden; animation: modalPop 0.2s ease-out; }
-          @keyframes modalPop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
-
-          .modal-header { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; background: #f8fafc; }
-          .modal-header h3 { margin: 0; font-size: 18px; color: #0f172a; }
-          .modal-close { background: none; border: none; font-size: 24px; color: #64748b; cursor: pointer; }
-          .modal-sub { font-size: 13px; color: #64748b; margin: 4px 0 16px; padding: 0 24px; }
-
-          .modal-form { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
-          .form-group { display: flex; flex-direction: column; gap: 6px; }
-          .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
-          .form-control { padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; outline: none; background: white; color: #0f172a; transition: border-color 0.2s, box-shadow 0.2s; }
-          .form-control:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
-
-          .modal-footer { padding: 16px 24px; background: #f8fafc; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 10px; }
-        `}</style>
+        <div className="data-card">
+          <div className="data-card-header">
+            <h3>Registered Guests ({guests.length})</h3>
+            <span className="tenant-badge">Database Backed</span>
+          </div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead>
+                <tr>
+                  <th>Full Name</th>
+                  <th>Email</th>
+                  <th>Phone</th>
+                  <th>ID Number</th>
+                </tr>
+              </thead>
+              <tbody>
+                {guests.length === 0 ? (
+                  <tr><td colSpan={4} className="empty-row">No guests registered yet. Click "+ Add Guest".</td></tr>
+                ) : (
+                  guests.map((g) => (
+                    <tr key={g.id}>
+                      <td><strong>{g.full_name}</strong></td>
+                      <td>{g.email || '—'}</td>
+                      <td>{g.phone || '—'}</td>
+                      <td>{g.id_number || '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     );
   }
@@ -398,9 +451,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       <div className="data-card" style={{ padding: '60px 20px', textAlign: 'center' }}>
         <h2>{moduleName} Module</h2>
         <p className="subtitle" style={{ margin: '8px 0 20px' }}>
-          This module is scaffolded and scheduled for implementation in Phase 2. Database migrations are verified.
+          This module is scaffolded and scheduled for implementation in upcoming phases.
         </p>
-        <span className="tenant-badge">Phase 2 Scheduled</span>
+        <span className="tenant-badge">Scheduled</span>
       </div>
     </div>
   );
