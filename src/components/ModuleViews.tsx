@@ -18,6 +18,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [subModal, setSubModal] = useState<'guest' | 'reservation'>('reservation');
 
   // Room Form State
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -58,10 +59,12 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setLoading(true);
     setError(null);
     try {
-      const { data: typesData } = await supabase.from('room_types').select('*').eq('hotel_id', targetHotelId);
+      const { data: typesData, error: tErr } = await supabase.from('room_types').select('*').eq('hotel_id', targetHotelId);
+      if (tErr) throw tErr;
       setRoomTypes(typesData || []);
 
-      const { data: roomsData } = await supabase.from('rooms').select('*, room_type:room_types(*)').eq('hotel_id', targetHotelId).order('room_number');
+      const { data: roomsData, error: rErr } = await supabase.from('rooms').select('*, room_type:room_types(*)').eq('hotel_id', targetHotelId).order('room_number');
+      if (rErr) throw rErr;
       setRooms(roomsData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch rooms.');
@@ -75,13 +78,16 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setLoading(true);
     setError(null);
     try {
-      const { data: gData } = await supabase.from('guests').select('*').eq('hotel_id', targetHotelId);
+      const { data: gData, error: gErr } = await supabase.from('guests').select('*').eq('hotel_id', targetHotelId);
+      if (gErr) throw gErr;
       setGuests(gData || []);
 
-      const { data: rData } = await supabase.from('rooms').select('*').eq('hotel_id', targetHotelId);
+      const { data: rData, error: rErr } = await supabase.from('rooms').select('*').eq('hotel_id', targetHotelId).eq('status', 'available');
+      if (rErr) throw rErr;
       setRooms(rData || []);
 
-      const { data: resData } = await supabase.from('reservations').select('*, guest:guests(*), room:rooms(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
+      const { data: resData, error: resErr } = await supabase.from('reservations').select('*, guest:guests(*), room:rooms(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
+      if (resErr) throw resErr;
       setReservations(resData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch reservations.');
@@ -95,6 +101,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     if (!supabase || !hotelId) return;
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     try {
       const payload = {
         hotel_id: hotelId,
@@ -128,6 +135,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     if (!supabase || !hotelId) return;
     setSubmitting(true);
     setError(null);
+    setNotice(null);
     try {
       const { error: insErr } = await supabase.from('guests').insert([{
         hotel_id: hotelId,
@@ -151,9 +159,37 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const handleSaveReservation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!supabase || !hotelId) return;
+
+    // Task 3: Data integrity validations
+    if (new Date(resCheckOut) <= new Date(resCheckIn)) {
+      setError('Check-out date must be later than check-in date.');
+      return;
+    }
+    const rateVal = parseFloat(resRate);
+    if (isNaN(rateVal) || rateVal < 0) {
+      setError('Agreed rate must be a valid non-negative number.');
+      return;
+    }
+
     setSubmitting(true);
     setError(null);
+    setNotice(null);
+
     try {
+      // Check for overlapping active reservations on the same room
+      const { data: overlaps, error: ovErr } = await supabase
+        .from('reservations')
+        .select('id')
+        .eq('room_id', resRoomId)
+        .neq('status', 'cancelled')
+        .lte('check_in_date', resCheckOut)
+        .gte('check_out_date', resCheckIn);
+
+      if (ovErr) throw ovErr;
+      if (overlaps && overlaps.length > 0) {
+        throw new Error('Selected room is already booked for overlapping dates.');
+      }
+
       const { error: insErr } = await supabase.from('reservations').insert([{
         hotel_id: hotelId,
         guest_id: resGuestId,
@@ -161,9 +197,10 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         check_in_date: resCheckIn,
         check_out_date: resCheckOut,
         adults: parseInt(resAdults) || 1,
-        agreed_rate: parseFloat(resRate) || 0,
+        agreed_rate: rateVal,
         status: 'confirmed'
       }]);
+
       if (insErr) throw insErr;
       setNotice('Reservation booked successfully.');
       setModalOpen(false);
@@ -288,8 +325,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   }
 
   if (moduleName === 'Reservations') {
-    const [subModal, setSubModal] = useState<'guest' | 'reservation'>('reservation');
-
     return (
       <div className="module-view-container">
         {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
@@ -347,7 +382,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                     </select>
                   </div>
                   <div className="form-group">
-                    <label>Select Room *</label>
+                    <label>Select Available Room *</label>
                     <select required value={resRoomId} onChange={(e) => setResRoomId(e.target.value)} className="form-control">
                       <option value="">-- Choose Room --</option>
                       {rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number} ({r.status})</option>)}
