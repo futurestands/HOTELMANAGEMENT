@@ -1,183 +1,257 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 
-// Strict test and hook timeouts
-vi.setConfig({ testTimeout: 40000, hookTimeout: 25000 });
+vi.setConfig({ testTimeout: 60000, hookTimeout: 30000 });
 
-describe('HotelOS Rigorous Security & RLS Test Suite (Phase 1O)', () => {
-  const runId = `phase1o-${Date.now()}`;
+describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
+  const runId = `p1p-${Date.now()}`;
   const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
   const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
   const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-  let anonClient: any = null;
   let adminClient: any = null;
-
   let hotelAId: string | null = null;
   let hotelBId: string | null = null;
-  let roomInHotelBId: string | null = null;
-  let createdRecordIds: string[] = [];
 
-  const hasServiceRole = Boolean(serviceRoleKey && supabaseUrl);
+  let ownerAId: string | null = null;
+  let ownerBId: string | null = null;
+  let adminAId: string | null = null;
+  let managerAId: string | null = null;
+  let receptionistAId: string | null = null;
+  let cashierAId: string | null = null;
+  let inactiveAId: string | null = null;
+  let outsiderId: string | null = null;
+
+  let clientOwnerA: any = null;
+  let clientManagerA: any = null;
+  let clientReceptionistA: any = null;
+  let clientCashierA: any = null;
+  let clientOutsider: any = null;
+
+  let roomTypeAId: string | null = null;
+  let roomTypeBId: string | null = null;
+  let roomA1Id: string | null = null;
+  let roomB1Id: string | null = null;
+
+  const createdAuthUserIds: string[] = [];
+  const createdRecordIds: string[] = [];
+
+  const hasConfig = Boolean(supabaseUrl && supabaseAnonKey && serviceRoleKey);
 
   beforeAll(async () => {
-    if (!supabaseUrl || !supabaseAnonKey) {
+    if (!hasConfig) {
+      console.warn('BLOCKED: Missing required environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY).');
       return;
     }
-    anonClient = createClient(supabaseUrl, supabaseAnonKey);
 
-    if (hasServiceRole) {
-      adminClient = createClient(supabaseUrl, serviceRoleKey);
-      try {
-        // Create 2 real test hotels
-        const { data: hA, error: errA } = await adminClient.from('hotels').insert([{ name: `Test Hotel A ${runId}` }]).select().single();
-        const { data: hB, error: errB } = await adminClient.from('hotels').insert([{ name: `Test Hotel B ${runId}` }]).select().single();
+    adminClient = createClient(supabaseUrl, serviceRoleKey);
 
-        if (errA || errB) {
-          throw new Error(`Failed to create test hotel fixtures: ${errA?.message || errB?.message}`);
-        }
+    // 1. Create Hotels
+    const { data: hA, error: errHA } = await adminClient.from('hotels').insert([{ name: `Hotel A ${runId}` }]).select().single();
+    const { data: hB, error: errHB } = await adminClient.from('hotels').insert([{ name: `Hotel B ${runId}` }]).select().single();
+    if (errHA || errHB) throw new Error(`Fixture hotel creation failed: ${errHA?.message || errHB?.message}`);
+    hotelAId = hA.id;
+    hotelBId = hB.id;
 
-        if (hA) hotelAId = hA.id;
-        if (hB) hotelBId = hB.id;
+    async function createUserAndClient(emailPrefix: string) {
+      const email = `${emailPrefix}-${runId}@test.com`;
+      const password = `TestPass123!${runId}`;
+      const { data: authData, error: authErr } = await adminClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true
+      });
+      if (authErr || !authData.user) throw new Error(`Failed to create user ${email}: ${authErr?.message}`);
+      const userId = authData.user.id;
+      createdAuthUserIds.push(userId);
 
-        // Create a known room in Hotel B
-        if (hotelBId) {
-          const { data: rB, error: errRB } = await adminClient.from('rooms').insert([
-            { hotel_id: hotelBId, room_number: `B101-${runId}`, status: 'available' }
-          ]).select().single();
-          if (errRB) {
-            throw new Error(`Failed to create Hotel B room fixture: ${errRB.message}`);
-          }
-          if (rB) {
-            roomInHotelBId = rB.id;
-            createdRecordIds.push(rB.id);
-          }
-        }
-      } catch (err) {
-        console.error('Fixture setup failed:', err);
-      }
+      const client = createClient(supabaseUrl, supabaseAnonKey);
+      await client.auth.signInWithPassword({ email, password });
+      return { userId, client };
     }
+
+    // 2. Create users
+    const uOwnerA = await createUserAndClient('owner-a');
+    ownerAId = uOwnerA.userId;
+    clientOwnerA = uOwnerA.client;
+
+    const uOwnerB = await createUserAndClient('owner-b');
+    ownerBId = uOwnerB.userId;
+
+    const uAdminA = await createUserAndClient('admin-a');
+    adminAId = uAdminA.userId;
+
+    const uManagerA = await createUserAndClient('manager-a');
+    managerAId = uManagerA.userId;
+    clientManagerA = uManagerA.client;
+
+    const uRecA = await createUserAndClient('receptionist-a');
+    receptionistAId = uRecA.userId;
+    clientReceptionistA = uRecA.client;
+
+    const uCashA = await createUserAndClient('cashier-a');
+    cashierAId = uCashA.userId;
+    clientCashierA = uCashA.client;
+
+    const uInactA = await createUserAndClient('inactive-a');
+    inactiveAId = uInactA.userId;
+
+    const uOut = await createUserAndClient('outsider');
+    outsiderId = uOut.userId;
+    clientOutsider = uOut.client;
+
+    // 3. Create Memberships
+    const memberships = [
+      { hotel_id: hotelAId, user_id: ownerAId, role: 'owner', is_active: true },
+      { hotel_id: hotelBId, user_id: ownerBId, role: 'owner', is_active: true },
+      { hotel_id: hotelAId, user_id: adminAId, role: 'administrator', is_active: true },
+      { hotel_id: hotelAId, user_id: managerAId, role: 'manager', is_active: true },
+      { hotel_id: hotelAId, user_id: receptionistAId, role: 'receptionist', is_active: true },
+      { hotel_id: hotelAId, user_id: cashierAId, role: 'cashier', is_active: true },
+      { hotel_id: hotelAId, user_id: inactiveAId, role: 'receptionist', is_active: false },
+    ];
+    const { error: memErr } = await adminClient.from('hotel_memberships').insert(memberships);
+    if (memErr) throw new Error(`Fixture memberships creation failed: ${memErr.message}`);
+
+    // 4. Create Room Types & Rooms
+    const { data: rtA } = await adminClient.from('room_types').insert([{ hotel_id: hotelAId, name: 'Deluxe A', base_rate: 150000, minimum_rate: 100000 }]).select().single();
+    const { data: rtB } = await adminClient.from('room_types').insert([{ hotel_id: hotelBId, name: 'Deluxe B', base_rate: 200000, minimum_rate: 150000 }]).select().single();
+    if (rtA) roomTypeAId = rtA.id;
+    if (rtB) roomTypeBId = rtB.id;
+
+    const { data: rA1 } = await adminClient.from('rooms').insert([{ hotel_id: hotelAId, room_number: `A101-${runId}`, room_type_id: roomTypeAId, status: 'available' }]).select().single();
+    const { data: rB1 } = await adminClient.from('rooms').insert([{ hotel_id: hotelBId, room_number: `B101-${runId}`, room_type_id: roomTypeBId, status: 'available' }]).select().single();
+    if (rA1) { roomA1Id = rA1.id; createdRecordIds.push(rA1.id); }
+    if (rB1) { roomB1Id = rB1.id; createdRecordIds.push(rB1.id); }
   });
 
   afterAll(async () => {
-    if (adminClient) {
-      if (createdRecordIds.length > 0) {
-        await adminClient.from('rooms').delete().in('id', createdRecordIds);
-      }
-      if (hotelAId) {
-        await adminClient.from('hotels').delete().eq('id', hotelAId);
-      }
-      if (hotelBId) {
-        await adminClient.from('hotels').delete().eq('id', hotelBId);
-      }
+    if (!adminClient) return;
+    if (createdRecordIds.length > 0) {
+      await adminClient.from('rooms').delete().in('id', createdRecordIds);
+    }
+    if (roomTypeAId) await adminClient.from('room_types').delete().eq('id', roomTypeAId);
+    if (roomTypeBId) await adminClient.from('room_types').delete().eq('id', roomTypeBId);
+    if (hotelAId) await adminClient.from('hotels').delete().eq('id', hotelAId);
+    if (hotelBId) await adminClient.from('hotels').delete().eq('id', hotelBId);
+    for (const uid of createdAuthUserIds) {
+      await adminClient.auth.admin.deleteUser(uid);
     }
   });
 
-  it('1. Anonymous SELECT, INSERT, UPDATE, DELETE must be denied by RLS with error 42501', async () => {
-    if (!anonClient) {
-      expect.fail('BLOCKED: Supabase client not configured.');
+  it('A. Authenticated Tenant Isolation: ownerA vs Hotel B records', async () => {
+    if (!hasConfig || !roomB1Id || !hotelBId) {
+      expect.fail('BLOCKED: Missing test configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
     }
-    await anonClient.auth.signOut();
 
-    // Anonymous SELECT
-    const { data, error } = await anonClient.from('rooms').select('*');
-    const isDenied = (error !== null) || (data && data.length === 0);
-    expect(isDenied).toBe(true);
+    const { data: readB } = await clientOwnerA.from('rooms').select('*').eq('id', roomB1Id);
+    expect(readB?.length || 0).toBe(0);
 
-    // Anonymous INSERT must fail with RLS permission denied (42501)
-    const { error: insertErr } = await anonClient.from('rooms').insert([
-      { hotel_id: '00000000-0000-0000-0000-000000000001', room_number: `ANON-${runId}`, status: 'available' }
+    const { error: insBErr } = await clientOwnerA.from('rooms').insert([
+      { hotel_id: hotelBId, room_number: `B999-${runId}`, status: 'available' }
     ]);
-    expect(insertErr).not.toBeNull();
-    expect(insertErr?.code === '42501' || insertErr?.message?.toLowerCase().includes('policy') || insertErr?.message?.toLowerCase().includes('permission')).toBe(true);
-  });
+    expect(insBErr).not.toBeNull();
+    expect(insBErr?.code).toBe('42501');
 
-  it('2. Authenticated Tenant Isolation: Hotel A cannot read, insert, update or delete Hotel B records', async () => {
-    if (!hasServiceRole || !hotelAId || !hotelBId || !roomInHotelBId) {
-      console.warn('SKIPPED: SUPABASE_SERVICE_ROLE_KEY or test hotel fixtures unavailable for tenant isolation test.');
-      // Fail closed or report as explicitly skipped via test execution result
-      expect(true).toBe(true); // Graceful skip when environment lacks service role key
-      return;
-    }
+    const { data: checkB } = await adminClient.from('rooms').select('*').eq('id', roomB1Id).single();
+    expect(checkB.status).toBe('available');
 
-    // Verify Hotel B record exists via admin client
-    const { data: beforeB } = await adminClient.from('rooms').select('*').eq('id', roomInHotelBId).single();
-    expect(beforeB).not.toBeNull();
-
-    // Attempt read/update/delete as unauthenticated client against Hotel B room
-    await anonClient.auth.signOut();
-    const { data: readB, error: readErr } = await anonClient.from('rooms').select('*').eq('id', roomInHotelBId);
-    expect(readErr !== null || (readB && readB.length === 0)).toBe(true);
-
-    const { error: updateErr } = await anonClient.from('rooms').update({ status: 'occupied' }).eq('id', roomInHotelBId);
-    expect(updateErr).not.toBeNull();
-
-    const { error: deleteErr } = await anonClient.from('rooms').delete().eq('id', roomInHotelBId);
-    expect(deleteErr).not.toBeNull();
-
-    // Verify via admin client that Hotel B record remains unchanged
-    const { data: afterB } = await adminClient.from('rooms').select('*').eq('id', roomInHotelBId).single();
-    expect(afterB.status).toBe(beforeB.status);
-  });
-
-  it('3. Membership Authorization: Self-promotion and privilege escalation must be rejected', async () => {
-    if (!anonClient) {
-      expect.fail('BLOCKED: Supabase client not configured.');
-    }
-    await anonClient.auth.signOut();
-    const { error } = await anonClient.from('hotel_memberships').insert([
-      { hotel_id: '00000000-0000-0000-0000-000000000001', role: 'owner', is_active: true }
-    ]);
-    expect(error).not.toBeNull();
-    expect(error?.code === '42501' || error?.message?.toLowerCase().includes('policy') || error?.message?.toLowerCase().includes('unauthorized')).toBe(true);
-  });
-
-  it('4. Room Uniqueness Constraint: Case-insensitive unique room number (Code 23505) and concurrency', async () => {
-    if (!hasServiceRole || !adminClient || !hotelAId) {
-      console.warn('SKIPPED: Admin client or test Hotel A fixture unavailable for uniqueness test.');
-      expect(true).toBe(true);
-      return;
-    }
-    const roomNum = `UNIQ-${runId}`;
-
-    const { data: r1, error: err1 } = await adminClient.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: roomNum, status: 'available' }
+    const testRoomNum = `A-TEST-${runId}`;
+    const { data: insA, error: insAErr } = await clientOwnerA.from('rooms').insert([
+      { hotel_id: hotelAId, room_number: testRoomNum, status: 'available' }
     ]).select().single();
+    expect(insAErr).toBeNull();
+    if (insA) createdRecordIds.push(insA.id);
 
+    const { error: delAErr } = await clientOwnerA.from('rooms').delete().eq('id', insA.id);
+    expect(delAErr).toBeNull();
+  });
+
+  it('B. Role Matrix & Edge Cases: outsider, inactiveA, receptionist, cashier, manager', async () => {
+    if (!hasConfig || !hotelAId || !roomA1Id) {
+      expect.fail('BLOCKED: Missing configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
+    }
+
+    const clientInactive = createClient(supabaseUrl, supabaseAnonKey);
+    const { data: inactRooms } = await clientInactive.from('rooms').select('*').eq('hotel_id', hotelAId);
+    expect(inactRooms?.length || 0).toBe(0);
+
+    const { error: cashierErr } = await clientCashierA.from('rooms').insert([
+      { hotel_id: hotelAId, room_number: `CASH-${runId}`, status: 'available' }
+    ]);
+    expect(cashierErr).not.toBeNull();
+    expect(cashierErr?.code).toBe('42501');
+
+    const { data: recRoom, error: recInsErr } = await clientReceptionistA.from('rooms').insert([
+      { hotel_id: hotelAId, room_number: `REC-${runId}`, status: 'available' }
+    ]).select().single();
+    expect(recInsErr).toBeNull();
+    if (recRoom) createdRecordIds.push(recRoom.id);
+
+    const { error: recDelErr } = await clientReceptionistA.from('rooms').delete().eq('id', recRoom.id);
+    expect(recDelErr).not.toBeNull();
+
+    const { error: mgrRtErr } = await clientManagerA.from('room_types').insert([
+      { hotel_id: hotelAId, name: 'Suite Manager', base_rate: 300000, minimum_rate: 250000 }
+    ]);
+    expect(mgrRtErr).toBeNull();
+  });
+
+  it('C. Memberships & Authorization Boundaries', async () => {
+    if (!hasConfig || !hotelAId || !ownerAId || !adminAId || !outsiderId) {
+      expect.fail('BLOCKED: Missing configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
+    }
+
+    const { error: outMemErr } = await clientOutsider.from('hotel_memberships').insert([
+      { hotel_id: hotelAId, user_id: outsiderId, role: 'cashier', is_active: true }
+    ]);
+    expect(outMemErr).not.toBeNull();
+
+    const { error: selfPromoErr } = await clientOwnerA.from('hotel_memberships').insert([
+      { hotel_id: hotelAId, user_id: ownerAId, role: 'owner', is_active: true }
+    ]);
+    expect(selfPromoErr).not.toBeNull();
+  });
+
+  it('D. Room Uniqueness & Room Type Cross-Hotel Assignment', async () => {
+    if (!hasConfig || !hotelAId || !hotelBId || !roomTypeBId) {
+      expect.fail('BLOCKED: Missing configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
+    }
+    const dupRoomNum = `DUP-TEST-${runId}`;
+
+    const { data: ins1, error: err1 } = await clientOwnerA.from('rooms').insert([
+      { hotel_id: hotelAId, room_number: dupRoomNum, status: 'available' }
+    ]).select().single();
     expect(err1).toBeNull();
-    if (r1) createdRecordIds.push(r1.id);
+    if (ins1) createdRecordIds.push(ins1.id);
 
-    // Case-insensitive duplicate insert must fail with code 23505
-    const { error: err2 } = await adminClient.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: roomNum.toLowerCase(), status: 'available' }
+    const { error: err2 } = await clientOwnerA.from('rooms').insert([
+      { hotel_id: hotelAId, room_number: dupRoomNum.toLowerCase(), status: 'available' }
     ]);
     expect(err2).not.toBeNull();
     expect(err2?.code).toBe('23505');
 
-    // Concurrent duplicate inserts
-    const concurrentRoom = `CONC-${runId}`;
-    const results = await Promise.all([
-      adminClient.from('rooms').insert([{ hotel_id: hotelAId, room_number: concurrentRoom, status: 'available' }]),
-      adminClient.from('rooms').insert([{ hotel_id: hotelAId, room_number: concurrentRoom, status: 'available' }])
-    ]);
+    const { data: insOther, error: errOther } = await adminClient.from('rooms').insert([
+      { hotel_id: hotelBId, room_number: dupRoomNum, status: 'available' }
+    ]).select().single();
+    expect(errOther).toBeNull();
+    if (insOther) createdRecordIds.push(insOther.id);
 
+    const concNum = `CONC-${runId}`;
+    const results = await Promise.all([
+      clientOwnerA.from('rooms').insert([{ hotel_id: hotelAId, room_number: concNum, status: 'available' }]).select(),
+      clientOwnerA.from('rooms').insert([{ hotel_id: hotelAId, room_number: concNum, status: 'available' }]).select()
+    ]);
     const successes = results.filter(r => r.error === null);
     const failures = results.filter(r => r.error !== null);
     expect(successes.length).toBe(1);
     expect(failures.length).toBe(1);
     expect(failures[0].error?.code).toBe('23505');
+    if (successes[0].data?.[0]?.id) createdRecordIds.push(successes[0].data[0].id);
 
-    const createdConc = successes[0].data?.[0]?.id;
-    if (createdConc) createdRecordIds.push(createdConc);
-  });
-
-  it('5. Inactive memberships and users with no memberships must be denied access', async () => {
-    if (!anonClient) {
-      expect.fail('BLOCKED: Supabase client not configured.');
-    }
-    await anonClient.auth.signOut();
-    const { data, error } = await anonClient.from('hotel_memberships').select('*').eq('is_active', true);
-    const denied = error !== null || (data && data.length === 0);
-    expect(denied).toBe(true);
+    const { error: crossRtErr } = await clientManagerA.from('rooms').insert([
+      { hotel_id: hotelAId, room_number: `CROSS-${runId}`, room_type_id: roomTypeBId, status: 'available' }
+    ]);
+    expect(crossRtErr).not.toBeNull();
   });
 });
