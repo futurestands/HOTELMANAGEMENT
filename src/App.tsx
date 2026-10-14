@@ -31,6 +31,11 @@ function App() {
   const [dbStatus, setDbStatus] = useState<string>("Checking session...");
   const [loadingSession, setLoadingSession] = useState<boolean>(true);
 
+  // Real Database Operational Stats
+  const [roomStats, setRoomStats] = useState({ total: 0, occupied: 0 });
+  const [reservationCount, setReservationCount] = useState<number>(0);
+  const [lowStockCount, setLowStockCount] = useState<number>(0);
+
   const isDev = import.meta.env.DEV;
 
   useEffect(() => {
@@ -68,6 +73,38 @@ function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (hotelId && supabase) {
+      fetchLiveDashboardStats(hotelId);
+    }
+  }, [hotelId]);
+
+  const fetchLiveDashboardStats = async (targetHotelId: string) => {
+    if (!supabase) return;
+    try {
+      // Fetch rooms stats
+      const { data: rooms } = await supabase.from('rooms').select('status').eq('hotel_id', targetHotelId);
+      if (rooms) {
+        const total = rooms.length;
+        const occupied = rooms.filter(r => r.status === 'occupied').length;
+        setRoomStats({ total, occupied });
+      }
+
+      // Fetch reservations count
+      const { count: resCount } = await supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('hotel_id', targetHotelId).neq('status', 'cancelled');
+      setReservationCount(resCount || 0);
+
+      // Fetch stock items low stock count
+      const { data: stock } = await supabase.from('stock_items').select('quantity_in_stock, reorder_threshold').eq('hotel_id', targetHotelId);
+      if (stock) {
+        const lowStock = stock.filter(s => s.quantity_in_stock <= s.reorder_threshold).length;
+        setLowStockCount(lowStock);
+      }
+    } catch (err) {
+      console.error('Error fetching live stats:', err);
+    }
+  };
 
   const loadUserMemberships = async (userId: string) => {
     if (!supabase) return;
@@ -112,7 +149,7 @@ function App() {
         if (primary.hotel) {
           setHotelName(primary.hotel.name);
         }
-        setDbStatus("Connected to Supabase Database (RLS Enforced)");
+        setDbStatus("Connected to Supabase Database (Authenticated & RLS Enforced)");
       }
     } catch (err: any) {
       setDbStatus(`Membership error: ${err.message}`);
@@ -166,7 +203,7 @@ function App() {
               setIsAuthenticated(true);
               setHotelName("Development Demo Hotel");
               setHotelId("00000000-0000-0000-0000-000000000001");
-              setDbStatus("Development Demo Mode Active");
+              setDbStatus("Development Mode (Demo Fixture)");
             }
           }}
           onAuthSuccess={() => {
@@ -232,11 +269,11 @@ function App() {
               <h1>{active}</h1>
               <p className="muted">
                 {active === "Dashboard"
-                  ? `Overview for ${hotelName}. Status: ${dbStatus}`
+                  ? `Live database operational overview for ${hotelName}.`
                   : `Managing ${active} module with secure RLS policies and role verification.`}
               </p>
             </div>
-            {active === "Dashboard" ? null : (
+            {active === "Dashboard" || active === "Rooms" || active === "Reservations" ? null : (
               <button className="primary" onClick={() => setActive(active)}>
                 + New {active.slice(0, -1)}
               </button>
@@ -246,40 +283,40 @@ function App() {
           {active === "Dashboard" ? (
             <>
               <section className="cards">
-                <Metric title="Active Hotel ID" value={hotelId ? hotelId.slice(0, 8) + '...' : 'None'} note="Tenant scoped" />
-                <Metric title="Database Security" value="RLS Enforced" note="Policies active" />
+                <Metric title="Occupied Rooms" value={`${roomStats.occupied} / ${roomStats.total}`} note={roomStats.total > 0 ? `${Math.round((roomStats.occupied / roomStats.total) * 100)}% occupancy` : 'No rooms configured'} />
+                <Metric title="Active Reservations" value={reservationCount.toString()} note="Confirmed / checked-in" />
                 <Metric title="Assigned Role" value={userRole || 'None'} note="Permission checked" />
-                <Metric title="Auth Status" value={isAuthenticated ? "Authenticated" : "Unauthenticated"} note="Supabase secure" />
+                <Metric title="Low Stock Items" value={lowStockCount.toString()} note="Inventory reorder check" danger={lowStockCount > 0} />
               </section>
 
               <section className="grid-two">
                 <div className="panel">
                   <div className="panel-head">
-                    <h2>Phase 1D Status</h2>
-                    <span className="tag success">Complete</span>
+                    <h2>Live Database Metrics</h2>
+                    <span className="tag success">Connected</span>
                   </div>
                   <div className="operation-row">
-                    <span>Rooms Module</span>
-                    <strong>Fully Database Backed & Editable</strong>
+                    <span>Active Hotel ID</span>
+                    <strong>{hotelId ? hotelId.slice(0, 12) + '...' : 'None'}</strong>
                   </div>
                   <div className="operation-row">
-                    <span>Multi-Hotel Selector</span>
-                    <strong>{memberships.length} Hotel(s) Linked</strong>
+                    <span>Database Engine</span>
+                    <strong>PostgreSQL + RLS</strong>
                   </div>
                   <div className="operation-row">
-                    <span>Production Auth Bypass</span>
-                    <strong>Removed / Gated</strong>
+                    <span>Currency / Timezone</span>
+                    <strong>UGX / Africa/Kampala</strong>
                   </div>
                 </div>
 
                 <div className="panel">
                   <div className="panel-head">
-                    <h2>Security & RLS Policies</h2>
+                    <h2>Security & Tenant Isolation</h2>
                     <span className="tag success">Active</span>
                   </div>
                   <Alert text={`Database status: ${dbStatus}`} />
                   <Alert text="PostgreSQL Row Level Security (RLS) policies prevent cross-hotel access." />
-                  <Alert text="Room number uniqueness is enforced via database unique indexing (hotel_id, lower(room_number))." />
+                  <Alert text="Database-level triggers enforce concurrency-safe reservation overlap prevention." />
                 </div>
               </section>
             </>
