@@ -26,17 +26,17 @@ function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [userRole, setUserRole] = useState<UserRole | undefined>(undefined);
   const [hotelName, setHotelName] = useState<string>("Select Hotel");
+  const [currency, setCurrency] = useState<string>("UGX");
+  const [timezone, setTimezone] = useState<string>("Africa/Kampala");
   const [hotelId, setHotelId] = useState<string | undefined>(undefined);
   const [memberships, setMemberships] = useState<HotelMembership[]>([]);
-  const [dbStatus, setDbStatus] = useState<string>("Checking session...");
+  const [dbStatus, setDbStatus] = useState<string>("Checking authentication session...");
   const [loadingSession, setLoadingSession] = useState<boolean>(true);
 
   // Real Database Operational Stats
   const [roomStats, setRoomStats] = useState({ total: 0, occupied: 0 });
   const [reservationCount, setReservationCount] = useState<number>(0);
   const [lowStockCount, setLowStockCount] = useState<number>(0);
-
-  const isDev = import.meta.env.DEV;
 
   useEffect(() => {
     if (!supabase) {
@@ -52,7 +52,7 @@ function App() {
       } else {
         setIsAuthenticated(false);
         setLoadingSession(false);
-        setDbStatus("Awaiting Authentication");
+        setDbStatus("Please sign in with a valid staff account.");
       }
     });
 
@@ -67,7 +67,7 @@ function App() {
         setUserRole(undefined);
         setMemberships([]);
         setLoadingSession(false);
-        setDbStatus("Awaiting Authentication");
+        setDbStatus("Session signed out.");
       }
     });
 
@@ -77,13 +77,16 @@ function App() {
   useEffect(() => {
     if (hotelId && supabase) {
       fetchLiveDashboardStats(hotelId);
+    } else {
+      setRoomStats({ total: 0, occupied: 0 });
+      setReservationCount(0);
+      setLowStockCount(0);
     }
   }, [hotelId]);
 
   const fetchLiveDashboardStats = async (targetHotelId: string) => {
     if (!supabase) return;
     try {
-      // Fetch rooms stats
       const { data: rooms } = await supabase.from('rooms').select('status').eq('hotel_id', targetHotelId);
       if (rooms) {
         const total = rooms.length;
@@ -91,11 +94,9 @@ function App() {
         setRoomStats({ total, occupied });
       }
 
-      // Fetch reservations count
       const { count: resCount } = await supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('hotel_id', targetHotelId).neq('status', 'cancelled');
       setReservationCount(resCount || 0);
 
-      // Fetch stock items low stock count
       const { data: stock } = await supabase.from('stock_items').select('quantity_in_stock, reorder_threshold').eq('hotel_id', targetHotelId);
       if (stock) {
         const lowStock = stock.filter(s => s.quantity_in_stock <= s.reorder_threshold).length;
@@ -122,8 +123,8 @@ function App() {
         setMemberships([]);
         setHotelId(undefined);
         setUserRole(undefined);
-        setHotelName("No Hotel Membership");
-        setDbStatus("Connected (No active hotel memberships found)");
+        setHotelName("No Active Membership");
+        setDbStatus("Authenticated, but no active hotel memberships found in database.");
       } else {
         const mapped: HotelMembership[] = data.map((m: any) => ({
           id: m.id,
@@ -148,6 +149,8 @@ function App() {
         setUserRole(primary.role);
         if (primary.hotel) {
           setHotelName(primary.hotel.name);
+          setCurrency(primary.hotel.currency || 'UGX');
+          setTimezone(primary.hotel.timezone || 'Africa/Kampala');
         }
         setDbStatus("Connected to Supabase Database (Authenticated & RLS Enforced)");
       }
@@ -165,6 +168,8 @@ function App() {
       setUserRole(membership.role);
       if (membership.hotel) {
         setHotelName(membership.hotel.name);
+        setCurrency(membership.hotel.currency || 'UGX');
+        setTimezone(membership.hotel.timezone || 'Africa/Kampala');
       }
     }
   };
@@ -177,6 +182,9 @@ function App() {
     setHotelId(undefined);
     setUserRole(undefined);
     setMemberships([]);
+    setRoomStats({ total: 0, occupied: 0 });
+    setReservationCount(0);
+    setLowStockCount(0);
   };
 
   const allowedModuleNames = userRole ? getModulesForRole(userRole) : [];
@@ -197,15 +205,6 @@ function App() {
     <div className="app">
       {!isAuthenticated && (
         <AuthModal
-          onBypassDemo={(role) => {
-            if (isDev) {
-              setUserRole(role);
-              setIsAuthenticated(true);
-              setHotelName("Development Demo Hotel");
-              setHotelId("00000000-0000-0000-0000-000000000001");
-              setDbStatus("Development Mode (Demo Fixture)");
-            }
-          }}
           onAuthSuccess={() => {
             setIsAuthenticated(true);
           }}
@@ -229,7 +228,7 @@ function App() {
                 ))}
               </select>
             ) : (
-              <span>{hotelName} · UGX / Africa/Kampala</span>
+              <span>{hotelName} · {currency} / {timezone}</span>
             )}
           </div>
         </div>
@@ -305,7 +304,7 @@ function App() {
                   </div>
                   <div className="operation-row">
                     <span>Currency / Timezone</span>
-                    <strong>UGX / Africa/Kampala</strong>
+                    <strong>{currency} / {timezone}</strong>
                   </div>
                 </div>
 

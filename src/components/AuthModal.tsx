@@ -1,20 +1,16 @@
 import React, { useState } from 'react';
 import { supabase } from '../lib/supabase';
-import { UserRole } from '../types/hotel';
 
 interface AuthModalProps {
-  onBypassDemo: (role: UserRole) => void;
   onAuthSuccess: () => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo, onAuthSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ onAuthSuccess }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
-
-  const isDev = import.meta.env.DEV;
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -98,21 +94,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onBypassDemo, onAuthSucces
           <div style={styles.warningBox}>
             <p><strong>Supabase Not Connected:</strong> Environment variables VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are missing.</p>
           </div>
-        )}
-
-        {/* Production Security Rule: Demo mode is strictly gated behind import.meta.env.DEV */}
-        {isDev && (
-          <>
-            <div style={styles.divider}>
-              <span>[DEV MODE ONLY] TEST ROLE BYPASS</span>
-            </div>
-            <div style={styles.demoRoles}>
-              <button onClick={() => onBypassDemo('owner')} style={styles.demoButton}>👑 Owner</button>
-              <button onClick={() => onBypassDemo('manager')} style={styles.demoButton}>📊 Manager</button>
-              <button onClick={() => onBypassDemo('receptionist')} style={styles.demoButton}>📅 Receptionist</button>
-              <button onClick={() => onBypassDemo('cashier')} style={styles.demoButton}>💳 Cashier</button>
-            </div>
-          </>
         )}
       </div>
     </div>
@@ -208,32 +189,6 @@ const styles = {
     padding: '12px',
     borderRadius: '10px',
     fontSize: '14px',
-    textAlign: 'center' as const,
-  },
-  divider: {
-    margin: '24px 0 16px',
-    textAlign: 'center' as const,
-    position: 'relative' as const,
-    borderBottom: '1px solid #e2e8f0',
-    lineHeight: '0.1em',
-    fontSize: '11px',
-    color: '#94a3b8',
-    fontWeight: 700,
-  },
-  demoRoles: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(2, 1fr)',
-    gap: '10px',
-  },
-  demoButton: {
-    padding: '10px',
-    borderRadius: '10px',
-    border: '1px solid #e2e8f0',
-    background: '#f8fafc',
-    color: '#334155',
-    fontWeight: 600,
-    fontSize: '13px',
-    cursor: 'pointer',
     textAlign: 'center' as const,
   },
 };
