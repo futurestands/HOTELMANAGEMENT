@@ -33,6 +33,13 @@ function App() {
   const [dbStatus, setDbStatus] = useState<string>("Checking authentication session...");
   const [loadingSession, setLoadingSession] = useState<boolean>(true);
 
+  // Onboarding Form State
+  const [onboardName, setOnboardName] = useState("");
+  const [onboardCurrency, setOnboardCurrency] = useState("UGX");
+  const [onboardTimezone, setOnboardTimezone] = useState("Africa/Kampala");
+  const [onboardSubmitting, setOnboardSubmitting] = useState(false);
+  const [onboardError, setOnboardError] = useState<string | null>(null);
+
   // Real Database Operational Stats
   const [roomStats, setRoomStats] = useState({ total: 0, occupied: 0 });
   const [reservationCount, setReservationCount] = useState<number>(0);
@@ -124,7 +131,7 @@ function App() {
         setHotelId(undefined);
         setUserRole(undefined);
         setHotelName("No Active Membership");
-        setDbStatus("Authenticated, but no active hotel memberships found in database.");
+        setDbStatus("Authenticated, but no active hotel memberships found. Create your hotel below.");
       } else {
         const mapped: HotelMembership[] = data.map((m: any) => ({
           id: m.id,
@@ -158,6 +165,32 @@ function App() {
       setDbStatus(`Membership error: ${err.message}`);
     } finally {
       setLoadingSession(false);
+    }
+  };
+
+  const handleCreateHotel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase) return;
+    setOnboardSubmitting(true);
+    setOnboardError(null);
+    try {
+      const { data, error } = await supabase.rpc('create_initial_hotel', {
+        p_name: onboardName.trim(),
+        p_currency: onboardCurrency.trim(),
+        p_timezone: onboardTimezone.trim()
+      });
+      if (error) throw error;
+
+      // Reload memberships for current session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        await loadUserMemberships(session.user.id);
+      }
+      setOnboardName("");
+    } catch (err: any) {
+      setOnboardError(err.message || 'Failed to create hotel.');
+    } finally {
+      setOnboardSubmitting(false);
     }
   };
 
@@ -279,7 +312,32 @@ function App() {
             )}
           </div>
 
-          {active === "Dashboard" ? (
+          {memberships.length === 0 ? (
+            <div className="data-card" style={{ padding: '40px', maxWidth: '560px', margin: '40px auto' }}>
+              <h2>🏨 Welcome to HotelOS — Create Your Hotel Tenant</h2>
+              <p className="muted" style={{ margin: '8px 0 24px' }}>
+                You are signed in, but your account is not yet assigned to any hotel. Set up your hotel property below to become its Owner and start managing rooms, guests, and reservations.
+              </p>
+              {onboardError && <div className="alert-banner error" style={{ marginBottom: '16px' }}>{onboardError}</div>}
+              <form onSubmit={handleCreateHotel} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600 }}>Hotel / Property Name *</label>
+                  <input type="text" required value={onboardName} onChange={(e) => setOnboardName(e.target.value)} placeholder="e.g. Kampala Grand Hotel" className="form-control" style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                </div>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600 }}>Currency</label>
+                  <input type="text" value={onboardCurrency} onChange={(e) => setOnboardCurrency(e.target.value)} placeholder="UGX" className="form-control" style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                </div>
+                <div className="form-group" style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '13px', fontWeight: 600 }}>Timezone</label>
+                  <input type="text" value={onboardTimezone} onChange={(e) => setOnboardTimezone(e.target.value)} placeholder="Africa/Kampala" className="form-control" style={{ padding: '10px 12px', borderRadius: '8px', border: '1px solid #cbd5e1' }} />
+                </div>
+                <button type="submit" disabled={onboardSubmitting} className="btn-primary" style={{ marginTop: '10px' }}>
+                  {onboardSubmitting ? 'Creating Hotel...' : 'Initialize Hotel Tenant'}
+                </button>
+              </form>
+            </div>
+          ) : active === "Dashboard" ? (
             <>
               <section className="cards">
                 <Metric title="Occupied Rooms" value={`${roomStats.occupied} / ${roomStats.total}`} note={roomStats.total > 0 ? `${Math.round((roomStats.occupied / roomStats.total) * 100)}% occupancy` : 'No rooms configured'} />
