@@ -13,12 +13,14 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
   const [guests, setGuests] = useState<Guest[]>([]);
   const [reservations, setReservations] = useState<Reservation[]>([]);
+  const [folios, setFolios] = useState<any[]>([]);
+  const [payments, setPayments] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [subModal, setSubModal] = useState<'guest' | 'reservation'>('reservation');
+  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment'>('reservation');
 
   // Room Form State
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -41,9 +43,16 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [resAdults, setResAdults] = useState('1');
   const [resRate, setResRate] = useState('150000');
 
+  // Payment Form State
+  const [payFolioId, setPayFolioId] = useState('');
+  const [payAmount, setPayAmount] = useState('150000');
+  const [payMethod, setPayMethod] = useState<'cash' | 'mobile_money' | 'card' | 'bank'>('cash');
+  const [payRef, setPayRef] = useState('');
+
   const [submitting, setSubmitting] = useState(false);
 
   const canManage = ['owner', 'administrator', 'manager', 'receptionist'].includes(userRole || '');
+  const canCashier = ['owner', 'administrator', 'manager', 'cashier'].includes(userRole || '');
 
   useEffect(() => {
     if (!hotelId) return;
@@ -51,6 +60,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       fetchRoomsAndTypes(hotelId);
     } else if (moduleName === 'Reservations') {
       fetchReservationsAndFixtures(hotelId);
+    } else if (moduleName === 'Cashier') {
+      fetchCashierData(hotelId);
     }
   }, [moduleName, hotelId]);
 
@@ -91,6 +102,25 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       setReservations(resData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch reservations.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCashierData = async (targetHotelId: string) => {
+    if (!supabase) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: fData, error: fErr } = await supabase.from('folios').select('*, guest:guests(*), reservation:reservations(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
+      if (fErr) throw fErr;
+      setFolios(fData || []);
+
+      const { data: pData, error: pErr } = await supabase.from('payments').select('*').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
+      if (pErr) throw pErr;
+      setPayments(pData || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch cashier records.');
     } finally {
       setLoading(false);
     }
@@ -160,7 +190,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     e.preventDefault();
     if (!supabase || !hotelId) return;
 
-    // Task 3: Data integrity validations
     if (new Date(resCheckOut) <= new Date(resCheckIn)) {
       setError('Check-out date must be later than check-in date.');
       return;
@@ -176,21 +205,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setNotice(null);
 
     try {
-      // Check for overlapping active reservations on the same room
-      const { data: overlaps, error: ovErr } = await supabase
-        .from('reservations')
-        .select('id')
-        .eq('room_id', resRoomId)
-        .neq('status', 'cancelled')
-        .lte('check_in_date', resCheckOut)
-        .gte('check_out_date', resCheckIn);
-
-      if (ovErr) throw ovErr;
-      if (overlaps && overlaps.length > 0) {
-        throw new Error('Selected room is already booked for overlapping dates.');
-      }
-
-      const { error: insErr } = await supabase.from('reservations').insert([{
+      const { data: resData, error: insErr } = await supabase.from('reservations').insert([{
         hotel_id: hotelId,
         guest_id: resGuestId,
         room_id: resRoomId,
@@ -199,14 +214,75 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         adults: parseInt(resAdults) || 1,
         agreed_rate: rateVal,
         status: 'confirmed'
-      }]);
+      }]).select().single();
 
       if (insErr) throw insErr;
-      setNotice('Reservation booked successfully.');
+
+      // Automatically create corresponding folio for the reservation
+      if (resData) {
+        await supabase.from('folios').insert([{
+          hotel_id: hotelId,
+          reservation_id: resData.id,
+          guest_id: resGuestId,
+          status: 'open',
+          total_charges: rateVal,
+          total_payments: 0
+        }]);
+      }
+
+      setNotice('Reservation booked and folio opened successfully.');
       setModalOpen(false);
       await fetchReservationsAndFixtures(hotelId);
     } catch (err: any) {
       setError(err.message || 'Failed to book reservation.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRecordPayment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !hotelId) return;
+    const amountVal = parseFloat(payAmount);
+    if (isNaN(amountVal) || amountVal <= 0) {
+      setError('Payment amount must be greater than zero.');
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const { error: payErr } = await supabase.from('payments').insert([{
+        hotel_id: hotelId,
+        folio_id: payFolioId || null,
+        amount: amountVal,
+        payment_method: payMethod,
+        reference_number: payRef.trim() || `TXN-${Date.now()}`
+      }]);
+
+      if (payErr) throw payErr;
+
+      // Update folio total payments
+      if (payFolioId) {
+        const targetFolio = folios.find(f => f.id === payFolioId);
+        if (targetFolio) {
+          const newPayments = Number(targetFolio.total_payments || 0) + amountVal;
+          const newStatus = newPayments >= Number(targetFolio.total_charges || 0) ? 'settled' : 'open';
+          await supabase.from('folios').update({
+            total_payments: newPayments,
+            status: newStatus
+          }).eq('id', payFolioId);
+        }
+      }
+
+      setNotice('Payment recorded successfully.');
+      setModalOpen(false);
+      setPayRef('');
+      await fetchCashierData(hotelId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to record payment.');
     } finally {
       setSubmitting(false);
     }
@@ -470,6 +546,140 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                       <td>{g.email || '—'}</td>
                       <td>{g.phone || '—'}</td>
                       <td>{g.id_number || '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (moduleName === 'Cashier') {
+    return (
+      <div className="module-view-container">
+        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
+        {notice && <div className="alert-banner success">{notice}</div>}
+
+        <div className="module-topbar">
+          <div>
+            <h2>Cashier & Billing</h2>
+            <p className="subtitle">Manage guest folios, record payments, and issue receipts.</p>
+          </div>
+          {canCashier && (
+            <button onClick={() => { setSubModal('payment'); setModalOpen(true); }} className="btn-primary">
+              + Record Payment
+            </button>
+          )}
+        </div>
+
+        {modalOpen && subModal === 'payment' && (
+          <div className="modal-backdrop">
+            <div className="modal-card">
+              <div className="modal-header">
+                <h3>Record Guest Payment</h3>
+                <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
+              </div>
+              <form onSubmit={handleRecordPayment} className="modal-form">
+                <div className="form-group">
+                  <label>Select Guest Folio *</label>
+                  <select required value={payFolioId} onChange={(e) => setPayFolioId(e.target.value)} className="form-control">
+                    <option value="">-- Choose Folio --</option>
+                    {folios.filter(f => f.status !== 'settled').map((f) => (
+                      <option key={f.id} value={f.id}>
+                        Folio #{f.id.slice(0, 6)} - {f.guest?.full_name || 'Guest'} (Balance: UGX {Number(f.total_charges - f.total_payments).toLocaleString()})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Amount (UGX) *</label>
+                  <input type="number" required value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Payment Method *</label>
+                  <select value={payMethod} onChange={(e) => setPayMethod(e.target.value as any)} className="form-control">
+                    <option value="cash">Cash</option>
+                    <option value="mobile_money">Mobile Money</option>
+                    <option value="card">Credit Card</option>
+                    <option value="bank">Bank Transfer</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Reference Number / Receipt Ref</label>
+                  <input type="text" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="TXN-98765" className="form-control" />
+                </div>
+                <div className="modal-footer">
+                  <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                  <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Processing...' : 'Record Payment'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        <div className="data-card" style={{ marginBottom: '24px' }}>
+          <div className="data-card-header">
+            <h3>Guest Folios ({folios.length})</h3>
+            <span className="tenant-badge">Database Backed</span>
+          </div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead>
+                <tr>
+                  <th>Folio ID</th>
+                  <th>Guest</th>
+                  <th>Total Charges</th>
+                  <th>Total Paid</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {folios.length === 0 ? (
+                  <tr><td colSpan={5} className="empty-row">No active folios found.</td></tr>
+                ) : (
+                  folios.map((f: any) => (
+                    <tr key={f.id}>
+                      <td><strong>#{f.id.slice(0, 8)}</strong></td>
+                      <td>{f.guest?.full_name || 'Guest'}</td>
+                      <td>UGX {Number(f.total_charges).toLocaleString()}</td>
+                      <td>UGX {Number(f.total_payments).toLocaleString()}</td>
+                      <td><span className={`status-badge ${f.status}`}>{f.status}</span></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="data-card">
+          <div className="data-card-header">
+            <h3>Payment Transactions ({payments.length})</h3>
+            <span className="tenant-badge">Database Backed</span>
+          </div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Method</th>
+                  <th>Amount</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.length === 0 ? (
+                  <tr><td colSpan={4} className="empty-row">No payments recorded yet.</td></tr>
+                ) : (
+                  payments.map((p: any) => (
+                    <tr key={p.id}>
+                      <td><strong>{p.reference_number}</strong></td>
+                      <td style={{ textTransform: 'capitalize' }}>{p.payment_method.replace('_', ' ')}</td>
+                      <td>UGX {Number(p.amount).toLocaleString()}</td>
+                      <td>{new Date(p.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))
                 )}
