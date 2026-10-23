@@ -41,10 +41,12 @@ function App() {
   const [onboardSubmitting, setOnboardSubmitting] = useState(false);
   const [onboardError, setOnboardError] = useState<string | null>(null);
 
-  // Real Database Operational Stats
-  const [roomStats, setRoomStats] = useState({ total: 0, occupied: 0 });
+  // Real Database Operational Stats & Feeds
+  const [roomStats, setRoomStats] = useState({ total: 0, occupied: 0, available: 0, cleaning: 0 });
   const [reservationCount, setReservationCount] = useState<number>(0);
   const [lowStockCount, setLowStockCount] = useState<number>(0);
+  const [totalRevenue, setTotalRevenue] = useState<number>(0);
+  const [recentBookings, setRecentBookings] = useState<any[]>([]);
 
   useEffect(() => {
     if (!supabase) {
@@ -99,22 +101,26 @@ function App() {
 
   useEffect(() => {
     if (hotelId && supabase) {
-      fetchLiveDashboardStats(hotelId);
+      fetchLiveDashboardData(hotelId);
     } else {
-      setRoomStats({ total: 0, occupied: 0 });
+      setRoomStats({ total: 0, occupied: 0, available: 0, cleaning: 0 });
       setReservationCount(0);
       setLowStockCount(0);
+      setTotalRevenue(0);
+      setRecentBookings([]);
     }
   }, [hotelId]);
 
-  const fetchLiveDashboardStats = async (targetHotelId: string) => {
+  const fetchLiveDashboardData = async (targetHotelId: string) => {
     if (!supabase) return;
     try {
       const { data: rooms } = await supabase.from('rooms').select('status').eq('hotel_id', targetHotelId);
       if (rooms) {
         const total = rooms.length;
         const occupied = rooms.filter(r => r.status === 'occupied').length;
-        setRoomStats({ total, occupied });
+        const available = rooms.filter(r => r.status === 'available').length;
+        const cleaning = rooms.filter(r => r.status === 'cleaning').length;
+        setRoomStats({ total, occupied, available, cleaning });
       }
 
       const { count: resCount } = await supabase.from('reservations').select('*', { count: 'exact', head: true }).eq('hotel_id', targetHotelId).neq('status', 'cancelled');
@@ -125,8 +131,17 @@ function App() {
         const lowStock = stock.filter(s => s.quantity_in_stock <= s.reorder_threshold).length;
         setLowStockCount(lowStock);
       }
+
+      const { data: payments } = await supabase.from('payments').select('amount').eq('hotel_id', targetHotelId);
+      if (payments) {
+        const rev = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+        setTotalRevenue(rev);
+      }
+
+      const { data: recentRes } = await supabase.from('reservations').select('*, guest:guests(*), room:rooms(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false }).limit(5);
+      setRecentBookings(recentRes || []);
     } catch (err) {
-      console.error('Error fetching live stats:', err);
+      console.error('Error fetching live dashboard data:', err);
     }
   };
 
@@ -230,9 +245,11 @@ function App() {
     setHotelId(undefined);
     setUserRole(undefined);
     setMemberships([]);
-    setRoomStats({ total: 0, occupied: 0 });
+    setRoomStats({ total: 0, occupied: 0, available: 0, cleaning: 0 });
     setReservationCount(0);
     setLowStockCount(0);
+    setTotalRevenue(0);
+    setRecentBookings([]);
   };
 
   const allowedModuleNames = userRole ? getModulesForRole(userRole) : [];
@@ -316,15 +333,10 @@ function App() {
               <h1>{active}</h1>
               <p className="muted">
                 {active === "Dashboard"
-                  ? `Live database operational overview for ${hotelName}.`
+                  ? `Welcome back! Here is your real-time property performance overview for ${hotelName}.`
                   : `Managing ${active} module with secure RLS policies and role verification.`}
               </p>
             </div>
-            {active === "Dashboard" || active === "Rooms" || active === "Reservations" || active === "IAM" || active === "Settings" ? null : (
-              <button className="primary" onClick={() => setActive(active)}>
-                + New {active.slice(0, -1)}
-              </button>
-            )}
           </div>
 
           {memberships.length === 0 ? (
@@ -355,40 +367,69 @@ function App() {
           ) : active === "Dashboard" ? (
             <>
               <section className="cards">
-                <Metric title="Occupied Rooms" value={`${roomStats.occupied} / ${roomStats.total}`} note={roomStats.total > 0 ? `${Math.round((roomStats.occupied / roomStats.total) * 100)}% occupancy` : 'No rooms configured'} />
-                <Metric title="Active Reservations" value={reservationCount.toString()} note="Confirmed / checked-in" />
-                <Metric title="Assigned Role" value={userRole || 'None'} note="Permission checked" />
-                <Metric title="Low Stock Items" value={lowStockCount.toString()} note="Inventory reorder check" danger={lowStockCount > 0} />
+                <Metric title="Total Revenue Collected" value={`${currency} ${totalRevenue.toLocaleString()}`} note="Live cashier payments" />
+                <Metric title="Room Occupancy" value={`${roomStats.occupied} / ${roomStats.total}`} note={roomStats.total > 0 ? `${Math.round((roomStats.occupied / roomStats.total) * 100)}% occupancy rate` : 'No rooms configured'} />
+                <Metric title="Active Reservations" value={reservationCount.toString()} note="Confirmed / checked-in bookings" />
+                <Metric title="Low Stock Alerts" value={lowStockCount.toString()} note="Inventory items needing reorder" danger={lowStockCount > 0} />
               </section>
 
-              <section className="grid-two">
-                <div className="panel">
-                  <div className="panel-head">
-                    <h2>Live Database Metrics</h2>
-                    <span className="tag success">Connected</span>
+              <section className="grid-two" style={{ gridTemplateColumns: '1.2fr 1fr', gap: '24px', marginTop: '24px' }}>
+                <div className="data-card">
+                  <div className="data-card-header">
+                    <h3>Recent Bookings & Arrivals</h3>
+                    <button className="action-link" onClick={() => setActive("Reservations")}>View All →</button>
                   </div>
-                  <div className="operation-row">
-                    <span>Active Hotel ID</span>
-                    <strong>{hotelId ? hotelId.slice(0, 12) + '...' : 'None'}</strong>
-                  </div>
-                  <div className="operation-row">
-                    <span>Database Engine</span>
-                    <strong>PostgreSQL + RLS</strong>
-                  </div>
-                  <div className="operation-row">
-                    <span>Currency / Timezone</span>
-                    <strong>{currency} / {timezone}</strong>
+                  <div className="table-wrapper">
+                    <table className="pro-table">
+                      <thead>
+                        <tr>
+                          <th>Guest</th>
+                          <th>Room</th>
+                          <th>Dates</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentBookings.length === 0 ? (
+                          <tr><td colSpan={4} className="empty-row">No recent bookings found.</td></tr>
+                        ) : (
+                          recentBookings.map((res: any) => (
+                            <tr key={res.id}>
+                              <td><strong>{res.guest?.full_name || 'Guest'}</strong></td>
+                              <td>Room {res.room?.room_number || 'N/A'}</td>
+                              <td>{res.check_in_date}</td>
+                              <td><span className={`status-badge ${res.status}`}>{res.status}</span></td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
 
-                <div className="panel">
-                  <div className="panel-head">
-                    <h2>Security & Tenant Isolation</h2>
-                    <span className="tag success">Active</span>
+                <div className="data-card">
+                  <div className="data-card-header">
+                    <h3>Property Status Summary</h3>
+                    <span className="tenant-badge">Live Overview</span>
                   </div>
-                  <Alert text={`Database status: ${dbStatus}`} />
-                  <Alert text="PostgreSQL Row Level Security (RLS) policies prevent cross-hotel access." />
-                  <Alert text="Database-level triggers enforce concurrency-safe reservation overlap prevention." />
+                  <div style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div className="operation-row" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+                      <span style={{ color: '#64748b' }}>Available Rooms</span>
+                      <strong>{roomStats.available}</strong>
+                    </div>
+                    <div className="operation-row" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+                      <span style={{ color: '#64748b' }}>Occupied Rooms</span>
+                      <strong>{roomStats.occupied}</strong>
+                    </div>
+                    <div className="operation-row" style={{ display: 'flex', justifyContent: 'space-between', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+                      <span style={{ color: '#64748b' }}>Rooms in Cleaning</span>
+                      <strong>{roomStats.cleaning}</strong>
+                    </div>
+                    <div className="operation-row" style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: '#64748b' }}>Assigned Staff Role</span>
+                      <strong style={{ textTransform: 'uppercase', color: '#2563eb' }}>{userRole || 'None'}</strong>
+                    </div>
+                  </div>
                 </div>
               </section>
             </>
@@ -436,15 +477,6 @@ function Metric({
       <span>{title}</span>
       <strong>{value}</strong>
       <small>{note}</small>
-    </div>
-  );
-}
-
-function Alert({ text }: { text: string }) {
-  return (
-    <div className="alert">
-      <span>!</span>
-      <p>{text}</p>
     </div>
   );
 }
