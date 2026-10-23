@@ -19,6 +19,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [membershipsList, setMembershipsList] = useState<any[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +84,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const isAdminOrOwner = ['owner', 'administrator'].includes(userRole || '');
 
   useEffect(() => {
-    // Clear notices when switching modules
     setError(null);
     setNotice(null);
     if (!hotelId) return;
@@ -100,6 +100,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       fetchRestaurantData(hotelId);
     } else if (moduleName === 'HR') {
       fetchHrData(hotelId);
+    } else if (moduleName === 'IAM') {
+      fetchIamData(hotelId);
     } else if (moduleName === 'Settings') {
       fetchSettingsData(hotelId);
     }
@@ -191,6 +193,21 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     }
   };
 
+  const fetchIamData = async (targetHotelId: string) => {
+    if (!supabase) return;
+    setLoading(true);
+    try {
+      const { data: mData } = await supabase.from('hotel_memberships').select('*, profiles(id, full_name, email)').eq('hotel_id', targetHotelId);
+      setMembershipsList(mData || []);
+      const { data: aData } = await supabase.from('audit_logs').select('*').eq('hotel_id', targetHotelId).order('created_at', { ascending: false }).limit(20);
+      setAuditLogs(aData || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch IAM data.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const fetchSettingsData = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
@@ -212,7 +229,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       const { error: updErr } = await supabase.from('hotel_memberships').update({ role: newRole }).eq('id', membershipId);
       if (updErr) throw updErr;
       setNotice('Staff role updated successfully.');
-      await fetchSettingsData(hotelId!);
+      if (moduleName === 'IAM') fetchIamData(hotelId!);
+      else fetchSettingsData(hotelId!);
     } catch (err: any) {
       setError(err.message || 'Failed to update role.');
     }
@@ -226,7 +244,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       const { error: updErr } = await supabase.from('hotel_memberships').update({ is_active: !currentStatus }).eq('id', membershipId);
       if (updErr) throw updErr;
       setNotice('Staff access status updated.');
-      await fetchSettingsData(hotelId!);
+      if (moduleName === 'IAM') fetchIamData(hotelId!);
+      else fetchSettingsData(hotelId!);
     } catch (err: any) {
       setError(err.message || 'Failed to update access status.');
     }
@@ -489,7 +508,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         <div>
           <h2>{moduleName}</h2>
           <p className="subtitle">
-            {moduleName === 'Settings' ? 'Manage property configurations, staff roles, and access rights.' : `Manage ${moduleName.toLowerCase()} with secure RLS policies and role verification.`}
+            {moduleName === 'Settings' ? 'Manage property configurations, preferences, and system defaults.' :
+             moduleName === 'IAM' ? 'Identity & Access Management (IAM), staff permissions, and security audit trail.' :
+             `Manage ${moduleName.toLowerCase()} with secure RLS policies and role verification.`}
           </p>
         </div>
         {moduleName === 'Rooms' && canManage && (
@@ -807,77 +828,135 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         </div>
       )}
 
+      {moduleName === 'IAM' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <div className="data-card">
+            <div className="data-card-header">
+              <h3>Identity & Access Management (IAM) — Staff Permissions</h3>
+              <span className="tenant-badge">Database Backed (RLS)</span>
+            </div>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
+              <p className="subtitle" style={{ margin: 0 }}>
+                Manage staff memberships, assign operational roles, and control access rights across modules.
+              </p>
+            </div>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead>
+                  <tr>
+                    <th>Staff Member</th>
+                    <th>Email</th>
+                    <th>Assigned Role</th>
+                    <th>Access Status</th>
+                    <th className="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {membershipsList.length === 0 ? (
+                    <tr><td colSpan={5} className="empty-row">No staff memberships found.</td></tr>
+                  ) : (
+                    membershipsList.map((m: any) => (
+                      <tr key={m.id}>
+                        <td><strong>{m.profiles?.full_name || 'Staff Member'}</strong></td>
+                        <td>{m.profiles?.email || '—'}</td>
+                        <td>
+                          {isAdminOrOwner ? (
+                            <select
+                              value={m.role}
+                              onChange={(e) => handleUpdateRole(m.id, e.target.value)}
+                              className="form-control"
+                              style={{ padding: '6px 10px', fontSize: '13px', width: '150px' }}
+                            >
+                              <option value="owner">Owner</option>
+                              <option value="administrator">Administrator</option>
+                              <option value="manager">Manager</option>
+                              <option value="receptionist">Receptionist</option>
+                              <option value="cashier">Cashier</option>
+                              <option value="storekeeper">Storekeeper</option>
+                              <option value="hr">HR</option>
+                            </select>
+                          ) : (
+                            <span className="role-badge" style={{ textTransform: 'uppercase' }}>{m.role}</span>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`status-badge ${m.is_active ? 'available' : 'maintenance'}`}>
+                            {m.is_active ? 'Active' : 'Revoked'}
+                          </span>
+                        </td>
+                        <td className="text-right">
+                          {isAdminOrOwner && (
+                            <button
+                              className="action-link"
+                              style={{ color: m.is_active ? '#dc2626' : '#16a34a' }}
+                              onClick={() => handleToggleActive(m.id, m.is_active)}
+                            >
+                              {m.is_active ? 'Revoke Access' : 'Restore Access'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="data-card">
+            <div className="data-card-header">
+              <h3>Security Audit Trail & Activity Log</h3>
+              <span className="tenant-badge">Immutable Ledger</span>
+            </div>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Action</th>
+                    <th>Table</th>
+                    <th>Record ID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {auditLogs.length === 0 ? (
+                    <tr><td colSpan={4} className="empty-row">No audit logs recorded yet.</td></tr>
+                  ) : (
+                    auditLogs.map((log: any) => (
+                      <tr key={log.id}>
+                        <td>{new Date(log.created_at).toLocaleString()}</td>
+                        <td><strong style={{ color: '#2563eb' }}>{log.action}</strong></td>
+                        <td>{log.table_name}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{log.record_id ? log.record_id.slice(0, 8) + '...' : '—'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       {moduleName === 'Settings' && (
         <div className="data-card">
           <div className="data-card-header">
-            <h3>Staff Access Rights & Role Management</h3>
-            <span className="tenant-badge">Database Backed (RLS)</span>
+            <h3>Hotel Property & System Preferences</h3>
+            <span className="tenant-badge">Config</span>
           </div>
-          <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
-            <p className="subtitle" style={{ margin: 0 }}>
-              Manage staff memberships, assign operational roles (Owner, Manager, Receptionist, Cashier, Storekeeper, HR), and toggle staff access rights.
-            </p>
-          </div>
-          <div className="table-wrapper">
-            <table className="pro-table">
-              <thead>
-                <tr>
-                  <th>Staff Member</th>
-                  <th>Email</th>
-                  <th>Assigned Role</th>
-                  <th>Access Status</th>
-                  <th className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {membershipsList.length === 0 ? (
-                  <tr><td colSpan={5} className="empty-row">No staff memberships found.</td></tr>
-                ) : (
-                  membershipsList.map((m: any) => (
-                    <tr key={m.id}>
-                      <td><strong>{m.profiles?.full_name || 'Staff Member'}</strong></td>
-                      <td>{m.profiles?.email || '—'}</td>
-                      <td>
-                        {isAdminOrOwner ? (
-                          <select
-                            value={m.role}
-                            onChange={(e) => handleUpdateRole(m.id, e.target.value)}
-                            className="form-control"
-                            style={{ padding: '6px 10px', fontSize: '13px', width: '150px' }}
-                          >
-                            <option value="owner">Owner</option>
-                            <option value="administrator">Administrator</option>
-                            <option value="manager">Manager</option>
-                            <option value="receptionist">Receptionist</option>
-                            <option value="cashier">Cashier</option>
-                            <option value="storekeeper">Storekeeper</option>
-                            <option value="hr">HR</option>
-                          </select>
-                        ) : (
-                          <span className="role-badge" style={{ textTransform: 'uppercase' }}>{m.role}</span>
-                        )}
-                      </td>
-                      <td>
-                        <span className={`status-badge ${m.is_active ? 'available' : 'maintenance'}`}>
-                          {m.is_active ? 'Active' : 'Revoked'}
-                        </span>
-                      </td>
-                      <td className="text-right">
-                        {isAdminOrOwner && (
-                          <button
-                            className="action-link"
-                            style={{ color: m.is_active ? '#dc2626' : '#16a34a' }}
-                            onClick={() => handleToggleActive(m.id, m.is_active)}
-                          >
-                            {m.is_active ? 'Revoke Access' : 'Restore Access'}
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+          <div style={{ padding: '30px 24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="form-group" style={{ maxWidth: '400px' }}>
+              <label>Property Currency</label>
+              <input type="text" disabled value="UGX (Ugandan Shilling)" className="form-control" />
+            </div>
+            <div className="form-group" style={{ maxWidth: '400px' }}>
+              <label>Property Timezone</label>
+              <input type="text" disabled value="Africa/Kampala" className="form-control" />
+            </div>
+            <div className="form-group" style={{ maxWidth: '400px' }}>
+              <label>Multi-Tenant RLS Status</label>
+              <input type="text" disabled value="Active & Enforced (PostgreSQL)" className="form-control" />
+            </div>
           </div>
         </div>
       )}

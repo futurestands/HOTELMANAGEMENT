@@ -17,6 +17,7 @@ const allModules: Module[] = [
   { name: "Inventory", icon: "📦", description: "Stock and purchasing" },
   { name: "Restaurant", icon: "🍽️", description: "Orders and food sales" },
   { name: "HR", icon: "👥", description: "Employees and leave" },
+  { name: "IAM", icon: "🛡️", description: "Identity, access, and audit logs" },
   { name: "Reports", icon: "📊", description: "Operational reporting" },
   { name: "Settings", icon: "⚙️", description: "Hotel configuration" },
 ];
@@ -52,7 +53,6 @@ function App() {
       return;
     }
 
-    // Timeout fallback so loading never hangs infinitely on network failure
     const timeoutId = setTimeout(() => {
       setLoadingSession((prev) => {
         if (prev) {
@@ -320,7 +320,7 @@ function App() {
                   : `Managing ${active} module with secure RLS policies and role verification.`}
               </p>
             </div>
-            {active === "Dashboard" || active === "Rooms" || active === "Reservations" ? null : (
+            {active === "Dashboard" || active === "Rooms" || active === "Reservations" || active === "IAM" || active === "Settings" ? null : (
               <button className="primary" onClick={() => setActive(active)}>
                 + New {active.slice(0, -1)}
               </button>

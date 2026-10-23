@@ -109,9 +109,9 @@ export function getModulesForRole(role: UserRole): string[] {
     case 'platform_admin':
     case 'owner':
     case 'administrator':
-      return ['Reservations', 'Rooms', 'Cashier', 'Inventory', 'Restaurant', 'HR', 'Reports', 'Settings'];
+      return ['Reservations', 'Rooms', 'Cashier', 'Inventory', 'Restaurant', 'HR', 'IAM', 'Reports', 'Settings'];
     case 'manager':
-      return ['Reservations', 'Rooms', 'Cashier', 'Inventory', 'Restaurant', 'HR', 'Reports'];
+      return ['Reservations', 'Rooms', 'Cashier', 'Inventory', 'Restaurant', 'HR', 'IAM', 'Reports'];
     case 'receptionist':
       return ['Reservations', 'Rooms', 'Cashier'];
     case 'cashier':
