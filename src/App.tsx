@@ -52,7 +52,19 @@ function App() {
       return;
     }
 
+    // Timeout fallback so loading never hangs infinitely on network failure
+    const timeoutId = setTimeout(() => {
+      setLoadingSession((prev) => {
+        if (prev) {
+          setDbStatus("Connection timeout or offline. Please sign in.");
+          return false;
+        }
+        return prev;
+      });
+    }, 6000);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
+      clearTimeout(timeoutId);
       if (session) {
         setIsAuthenticated(true);
         loadUserMemberships(session.user.id);
@@ -61,6 +73,10 @@ function App() {
         setLoadingSession(false);
         setDbStatus("Please sign in with a valid staff account.");
       }
+    }).catch((err) => {
+      clearTimeout(timeoutId);
+      setLoadingSession(false);
+      setDbStatus(`Network error: ${err.message || 'Failed to fetch'}`);
     });
 
     const {
@@ -174,14 +190,13 @@ function App() {
     setOnboardSubmitting(true);
     setOnboardError(null);
     try {
-      const { data, error } = await supabase.rpc('create_initial_hotel', {
+      const { error } = await supabase.rpc('create_initial_hotel', {
         p_name: onboardName.trim(),
         p_currency: onboardCurrency.trim(),
         p_timezone: onboardTimezone.trim()
       });
       if (error) throw error;
 
-      // Reload memberships for current session
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
         await loadUserMemberships(session.user.id);
