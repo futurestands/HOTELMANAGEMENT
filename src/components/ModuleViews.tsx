@@ -25,7 +25,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee' | 'receipt'>('reservation');
+  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee' | 'receipt' | 'invite_staff'>('reservation');
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
 
   // Room Form State
@@ -73,6 +73,10 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [empDept, setEmpDept] = useState('Front Office');
   const [empPhone, setEmpPhone] = useState('');
   const [empSalary, setEmpSalary] = useState('500000');
+
+  // Invite Staff State
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<UserRole>('receptionist');
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -248,6 +252,41 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       else fetchSettingsData(hotelId!);
     } catch (err: any) {
       setError(err.message || 'Failed to update access status.');
+    }
+  };
+
+  const handleInviteStaff = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !hotelId) return;
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      // Find profile by email or prompt user
+      const { data: profiles, error: pErr } = await supabase.from('profiles').select('id, email').eq('email', inviteEmail.trim());
+      if (pErr) throw pErr;
+
+      if (!profiles || profiles.length === 0) {
+        throw new Error('No user profile found with that email. Ensure the user has signed up for HotelOS first.');
+      }
+
+      const userId = profiles[0].id;
+      const { error: insErr } = await supabase.from('hotel_memberships').insert([{
+        hotel_id: hotelId,
+        user_id: userId,
+        role: inviteRole,
+        is_active: true
+      }]);
+
+      if (insErr) throw insErr;
+      setNotice(`Staff member (${inviteEmail}) successfully assigned role: ${inviteRole.toUpperCase()}`);
+      setModalOpen(false);
+      setInviteEmail('');
+      await fetchIamData(hotelId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to invite staff member.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -536,6 +575,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         {moduleName === 'HR' && canHr && (
           <button onClick={() => { setSubModal('employee'); setModalOpen(true); }} className="btn-primary">+ Add Employee</button>
         )}
+        {moduleName === 'IAM' && isAdminOrOwner && (
+          <button onClick={() => { setSubModal('invite_staff'); setModalOpen(true); }} className="btn-primary">+ Invite Staff Member</button>
+        )}
       </div>
 
       {modalOpen && (
@@ -549,6 +591,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 {moduleName === 'Inventory' && 'Add New Stock Item'}
                 {moduleName === 'Restaurant' && 'Add Menu Item'}
                 {moduleName === 'HR' && 'Add Employee Record'}
+                {moduleName === 'IAM' && subModal === 'invite_staff' && 'Invite & Assign Staff Role'}
               </h3>
               <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
             </div>
@@ -641,6 +684,32 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 <div className="form-group"><label>Phone</label><input type="text" value={empPhone} onChange={(e) => setEmpPhone(e.target.value)} placeholder="+256..." className="form-control" /></div>
                 <div className="form-group"><label>Monthly Salary (UGX) *</label><input type="number" required value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} className="form-control" /></div>
                 <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Employee'}</button></div>
+              </form>
+            )}
+
+            {moduleName === 'IAM' && subModal === 'invite_staff' && (
+              <form onSubmit={handleInviteStaff} className="modal-form">
+                <div className="form-group">
+                  <label>Staff User Email *</label>
+                  <input type="email" required value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} placeholder="staff@hotel.com" className="form-control" />
+                  <small style={{ color: '#64748b' }}>User must have already registered a HotelOS account.</small>
+                </div>
+                <div className="form-group">
+                  <label>Assign Operational Role *</label>
+                  <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as UserRole)} className="form-control">
+                    <option value="owner">Owner</option>
+                    <option value="administrator">Administrator</option>
+                    <option value="manager">Manager</option>
+                    <option value="receptionist">Receptionist</option>
+                    <option value="cashier">Cashier</option>
+                    <option value="storekeeper">Storekeeper</option>
+                    <option value="hr">HR</option>
+                  </select>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                  <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Assigning...' : 'Assign Role & Access'}</button>
+                </div>
               </form>
             )}
           </div>
@@ -832,13 +901,63 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="data-card">
             <div className="data-card-header">
-              <h3>Identity & Access Management (IAM) — Staff Permissions</h3>
-              <span className="tenant-badge">Database Backed (RLS)</span>
+              <h3>Role Permission Matrix & Access Levels</h3>
+              <span className="tenant-badge">Reference Guide</span>
             </div>
-            <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
-              <p className="subtitle" style={{ margin: 0 }}>
-                Manage staff memberships, assign operational roles, and control access rights across modules.
-              </p>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead>
+                  <tr>
+                    <th>Role</th>
+                    <th>Privilege Level</th>
+                    <th>Accessible Modules</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>Owner / Administrator</strong></td>
+                    <td><span className="status-badge available">Full Access</span></td>
+                    <td>All Modules (Rooms, Reservations, Cashier, Inventory, Restaurant, HR, IAM, Reports, Settings)</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Manager</strong></td>
+                    <td><span className="status-badge occupied">Operational Lead</span></td>
+                    <td>Rooms, Reservations, Cashier, Inventory, Restaurant, HR, Reports</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Receptionist</strong></td>
+                    <td><span className="status-badge reserved">Front Office</span></td>
+                    <td>Reservations, Rooms, Cashier</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Cashier</strong></td>
+                    <td><span className="status-badge available">Billing & POS</span></td>
+                    <td>Cashier, Reservations</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Storekeeper</strong></td>
+                    <td><span className="status-badge cleaning">Stock Control</span></td>
+                    <td>Inventory</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Restaurant Staff</strong></td>
+                    <td><span className="status-badge available">F&B Operations</span></td>
+                    <td>Restaurant</td>
+                  </tr>
+                  <tr>
+                    <td><strong>HR</strong></td>
+                    <td><span className="status-badge reserved">Personnel</span></td>
+                    <td>HR</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="data-card">
+            <div className="data-card-header">
+              <h3>Active Staff Memberships & Access Rights</h3>
+              <span className="tenant-badge">Database Backed (RLS)</span>
             </div>
             <div className="table-wrapper">
               <table className="pro-table">
@@ -853,7 +972,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 </thead>
                 <tbody>
                   {membershipsList.length === 0 ? (
-                    <tr><td colSpan={5} className="empty-row">No staff memberships found.</td></tr>
+                    <tr><td colSpan={5} className="empty-row">No additional staff assigned yet. Click "+ Invite Staff Member" above.</td></tr>
                   ) : (
                     membershipsList.map((m: any) => (
                       <tr key={m.id}>
