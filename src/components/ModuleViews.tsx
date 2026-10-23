@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
-import { Room, RoomType, Guest, Reservation, UserRole } from '../types/hotel';
+import { Room, RoomType, Guest, Reservation, StockItem, UserRole } from '../types/hotel';
 
 interface ModuleViewProps {
   moduleName: string;
@@ -15,12 +15,13 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [folios, setFolios] = useState<any[]>([]);
   const [payments, setPayments] = useState<any[]>([]);
+  const [stockItems, setStockItems] = useState<StockItem[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment'>('reservation');
+  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock'>('reservation');
 
   // Room Form State
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -40,7 +41,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [resRoomId, setResRoomId] = useState('');
   const [resCheckIn, setResCheckIn] = useState('');
   const [resCheckOut, setResCheckOut] = useState('');
-  const [resAdults, setResAdults] = useState('1');
   const [resRate, setResRate] = useState('150000');
 
   // Payment Form State
@@ -49,10 +49,19 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [payMethod, setPayMethod] = useState<'cash' | 'mobile_money' | 'card' | 'bank'>('cash');
   const [payRef, setPayRef] = useState('');
 
+  // Stock Form State
+  const [stockName, setStockName] = useState('');
+  const [stockCategory, setStockCategory] = useState('Kitchen');
+  const [stockUnit, setStockUnit] = useState('pcs');
+  const [stockQty, setStockQty] = useState('10');
+  const [stockThreshold, setStockThreshold] = useState('5');
+  const [stockCost, setStockCost] = useState('1000');
+
   const [submitting, setSubmitting] = useState(false);
 
   const canManage = ['owner', 'administrator', 'manager', 'receptionist'].includes(userRole || '');
   const canCashier = ['owner', 'administrator', 'manager', 'cashier'].includes(userRole || '');
+  const canInventory = ['owner', 'administrator', 'manager', 'storekeeper'].includes(userRole || '');
 
   useEffect(() => {
     if (!hotelId) return;
@@ -62,6 +71,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       fetchReservationsAndFixtures(hotelId);
     } else if (moduleName === 'Cashier') {
       fetchCashierData(hotelId);
+    } else if (moduleName === 'Inventory') {
+      fetchInventoryData(hotelId);
     }
   }, [moduleName, hotelId]);
 
@@ -121,6 +132,21 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       setPayments(pData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch cashier records.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchInventoryData = async (targetHotelId: string) => {
+    if (!supabase) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: sData, error: sErr } = await supabase.from('stock_items').select('*').eq('hotel_id', targetHotelId).order('name');
+      if (sErr) throw sErr;
+      setStockItems(sData || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch inventory.');
     } finally {
       setLoading(false);
     }
@@ -211,14 +237,13 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         room_id: resRoomId,
         check_in_date: resCheckIn,
         check_out_date: resCheckOut,
-        adults: parseInt(resAdults) || 1,
+        adults: 1,
         agreed_rate: rateVal,
         status: 'confirmed'
       }]).select().single();
 
       if (insErr) throw insErr;
 
-      // Automatically create corresponding folio for the reservation
       if (resData) {
         await supabase.from('folios').insert([{
           hotel_id: hotelId,
@@ -264,7 +289,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
 
       if (payErr) throw payErr;
 
-      // Update folio total payments
       if (payFolioId) {
         const targetFolio = folios.find(f => f.id === payFolioId);
         if (targetFolio) {
@@ -283,6 +307,36 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       await fetchCashierData(hotelId);
     } catch (err: any) {
       setError(err.message || 'Failed to record payment.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSaveStock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !hotelId) return;
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+
+    try {
+      const { error: insErr } = await supabase.from('stock_items').insert([{
+        hotel_id: hotelId,
+        name: stockName.trim(),
+        category: stockCategory.trim(),
+        unit: stockUnit.trim(),
+        quantity_in_stock: parseFloat(stockQty) || 0,
+        reorder_threshold: parseFloat(stockThreshold) || 5,
+        unit_cost: parseFloat(stockCost) || 0
+      }]);
+
+      if (insErr) throw insErr;
+      setNotice(`Stock item "${stockName}" added successfully.`);
+      setModalOpen(false);
+      setStockName('');
+      await fetchInventoryData(hotelId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save stock item.');
     } finally {
       setSubmitting(false);
     }
@@ -682,6 +736,114 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                       <td>{new Date(p.created_at).toLocaleDateString()}</td>
                     </tr>
                   ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (moduleName === 'Inventory') {
+    return (
+      <div className="module-view-container">
+        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
+        {notice && <div className="alert-banner success">{notice}</div>}
+
+        <div className="module-topbar">
+          <div>
+            <h2>Inventory & Stock Control</h2>
+            <p className="subtitle">Manage stock items, reorder thresholds, and inventory levels.</p>
+          </div>
+          {canInventory && (
+            <button onClick={() => { setSubModal('stock'); setModalOpen(true); }} className="btn-primary">
+              + Add Stock Item
+            </button>
+          )}
+        </div>
+
+        {modalOpen && subModal === 'stock' && (
+          <div className="modal-backdrop">
+            <div className="modal-card">
+              <div className="modal-header">
+                <h3>Add New Stock Item</h3>
+                <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
+              </div>
+              <form onSubmit={handleSaveStock} className="modal-form">
+                <div className="form-group">
+                  <label>Item Name *</label>
+                  <input type="text" required value={stockName} onChange={(e) => setStockName(e.target.value)} placeholder="e.g. Fresh Milk" className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Category</label>
+                  <input type="text" value={stockCategory} onChange={(e) => setStockCategory(e.target.value)} placeholder="Kitchen" className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Unit</label>
+                  <input type="text" value={stockUnit} onChange={(e) => setStockUnit(e.target.value)} placeholder="liters / pcs" className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Quantity in Stock *</label>
+                  <input type="number" required value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Reorder Threshold *</label>
+                  <input type="number" required value={stockThreshold} onChange={(e) => setStockThreshold(e.target.value)} className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Unit Cost (UGX) *</label>
+                  <input type="number" required value={stockCost} onChange={(e) => setStockCost(e.target.value)} className="form-control" />
+                </div>
+                <div className="modal-footer">
+                  <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                  <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Stock Item'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        <div className="data-card">
+          <div className="data-card-header">
+            <h3>Inventory Stock Items ({stockItems.length})</h3>
+            <span className="tenant-badge">Database Backed</span>
+          </div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead>
+                <tr>
+                  <th>Item Name</th>
+                  <th>Category</th>
+                  <th>In Stock</th>
+                  <th>Threshold</th>
+                  <th>Unit Cost</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stockItems.length === 0 ? (
+                  <tr><td colSpan={6} className="empty-row">No stock items configured yet. Click "+ Add Stock Item".</td></tr>
+                ) : (
+                  stockItems.map((s) => {
+                    const isLow = Number(s.quantity_in_stock) <= Number(s.reorder_threshold);
+                    return (
+                      <tr key={s.id}>
+                        <td><strong>{s.name}</strong></td>
+                        <td>{s.category}</td>
+                        <td>{s.quantity_in_stock} {s.unit}</td>
+                        <td>{s.reorder_threshold} {s.unit}</td>
+                        <td>UGX {Number(s.unit_cost).toLocaleString()}</td>
+                        <td>
+                          {isLow ? (
+                            <span className="status-badge maintenance">Low Stock</span>
+                          ) : (
+                            <span className="status-badge available">Normal</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
