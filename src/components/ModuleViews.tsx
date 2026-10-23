@@ -20,12 +20,13 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [employees, setEmployees] = useState<any[]>([]);
   const [membershipsList, setMembershipsList] = useState<any[]>([]);
   const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [customRoles, setCustomRoles] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee' | 'receipt' | 'invite_staff'>('reservation');
+  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee' | 'receipt' | 'invite_staff' | 'custom_role'>('reservation');
   const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
 
   // Room Form State
@@ -76,7 +77,11 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
 
   // Invite Staff State
   const [inviteEmail, setInviteEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<UserRole>('receptionist');
+  const [inviteRole, setInviteRole] = useState<string>('receptionist');
+
+  // Custom Role State
+  const [roleName, setRoleName] = useState('');
+  const [roleDesc, setRoleDesc] = useState('');
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -205,6 +210,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       setMembershipsList(mData || []);
       const { data: aData } = await supabase.from('audit_logs').select('*').eq('hotel_id', targetHotelId).order('created_at', { ascending: false }).limit(20);
       setAuditLogs(aData || []);
+      const { data: rData } = await supabase.from('hotel_roles').select('*').eq('hotel_id', targetHotelId).order('name');
+      setCustomRoles(rData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch IAM data.');
     } finally {
@@ -218,6 +225,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     try {
       const { data: mData } = await supabase.from('hotel_memberships').select('*, profiles(id, full_name, email)').eq('hotel_id', targetHotelId);
       setMembershipsList(mData || []);
+      const { data: rData } = await supabase.from('hotel_roles').select('*').eq('hotel_id', targetHotelId).order('name');
+      setCustomRoles(rData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch staff roles.');
     } finally {
@@ -262,7 +271,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setError(null);
     setNotice(null);
     try {
-      // Find profile by email or prompt user
       const { data: profiles, error: pErr } = await supabase.from('profiles').select('id, email').eq('email', inviteEmail.trim());
       if (pErr) throw pErr;
 
@@ -285,6 +293,30 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       await fetchIamData(hotelId);
     } catch (err: any) {
       setError(err.message || 'Failed to invite staff member.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCreateCustomRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!supabase || !hotelId) return;
+    setSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: insErr } = await supabase.from('hotel_roles').insert([{
+        hotel_id: hotelId,
+        name: roleName.trim(),
+        description: roleDesc.trim() || null
+      }]);
+      if (insErr) throw insErr;
+      setNotice(`Custom role "${roleName}" created successfully.`);
+      setModalOpen(false);
+      setRoleName(''); setRoleDesc('');
+      await fetchIamData(hotelId);
+    } catch (err: any) {
+      setError(err.message || 'Failed to create custom role.');
     } finally {
       setSubmitting(false);
     }
@@ -548,7 +580,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
           <h2>{moduleName}</h2>
           <p className="subtitle">
             {moduleName === 'Settings' ? 'Manage property configurations, preferences, and system defaults.' :
-             moduleName === 'IAM' ? 'Identity & Access Management (IAM), staff permissions, and security audit trail.' :
+             moduleName === 'IAM' ? 'Identity & Access Management (IAM), custom roles, staff permissions, and audit trail.' :
              `Manage ${moduleName.toLowerCase()} with secure RLS policies and role verification.`}
           </p>
         </div>
@@ -576,7 +608,10 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
           <button onClick={() => { setSubModal('employee'); setModalOpen(true); }} className="btn-primary">+ Add Employee</button>
         )}
         {moduleName === 'IAM' && isAdminOrOwner && (
-          <button onClick={() => { setSubModal('invite_staff'); setModalOpen(true); }} className="btn-primary">+ Invite Staff Member</button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button onClick={() => { setSubModal('custom_role'); setModalOpen(true); }} className="btn-secondary">+ Create Custom Role</button>
+            <button onClick={() => { setSubModal('invite_staff'); setModalOpen(true); }} className="btn-primary">+ Invite Staff Member</button>
+          </div>
         )}
       </div>
 
@@ -592,6 +627,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 {moduleName === 'Restaurant' && 'Add Menu Item'}
                 {moduleName === 'HR' && 'Add Employee Record'}
                 {moduleName === 'IAM' && subModal === 'invite_staff' && 'Invite & Assign Staff Role'}
+                {moduleName === 'IAM' && subModal === 'custom_role' && 'Create Custom Property Role'}
               </h3>
               <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
             </div>
@@ -696,7 +732,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 </div>
                 <div className="form-group">
                   <label>Assign Operational Role *</label>
-                  <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value as UserRole)} className="form-control">
+                  <select value={inviteRole} onChange={(e) => setInviteRole(e.target.value)} className="form-control">
                     <option value="owner">Owner</option>
                     <option value="administrator">Administrator</option>
                     <option value="manager">Manager</option>
@@ -704,11 +740,31 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                     <option value="cashier">Cashier</option>
                     <option value="storekeeper">Storekeeper</option>
                     <option value="hr">HR</option>
+                    {customRoles.map((cr) => (
+                      <option key={cr.id} value={cr.name}>{cr.name} (Custom)</option>
+                    ))}
                   </select>
                 </div>
                 <div className="modal-footer">
                   <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
                   <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Assigning...' : 'Assign Role & Access'}</button>
+                </div>
+              </form>
+            )}
+
+            {moduleName === 'IAM' && subModal === 'custom_role' && (
+              <form onSubmit={handleCreateCustomRole} className="modal-form">
+                <div className="form-group">
+                  <label>Custom Role Name *</label>
+                  <input type="text" required value={roleName} onChange={(e) => setRoleName(e.target.value)} placeholder="e.g. Night Auditor" className="form-control" />
+                </div>
+                <div className="form-group">
+                  <label>Description</label>
+                  <input type="text" value={roleDesc} onChange={(e) => setRoleDesc(e.target.value)} placeholder="Handles night shift audits and folio settlements" className="form-control" />
+                </div>
+                <div className="modal-footer">
+                  <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
+                  <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Creating...' : 'Create Custom Role'}</button>
                 </div>
               </form>
             )}
@@ -901,54 +957,35 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="data-card">
             <div className="data-card-header">
-              <h3>Role Permission Matrix & Access Levels</h3>
-              <span className="tenant-badge">Reference Guide</span>
+              <h3>Custom Property Roles ({customRoles.length})</h3>
+              <span className="tenant-badge">Dynamic Roles</span>
+            </div>
+            <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
+              <p className="subtitle" style={{ margin: 0 }}>
+                Define custom roles tailored to your hotel's specific departments (e.g., Night Auditor, Spa Manager, Executive Chef).
+              </p>
             </div>
             <div className="table-wrapper">
               <table className="pro-table">
                 <thead>
                   <tr>
-                    <th>Role</th>
-                    <th>Privilege Level</th>
-                    <th>Accessible Modules</th>
+                    <th>Role Name</th>
+                    <th>Description</th>
+                    <th>Created</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr>
-                    <td><strong>Owner / Administrator</strong></td>
-                    <td><span className="status-badge available">Full Access</span></td>
-                    <td>All Modules (Rooms, Reservations, Cashier, Inventory, Restaurant, HR, IAM, Reports, Settings)</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Manager</strong></td>
-                    <td><span className="status-badge occupied">Operational Lead</span></td>
-                    <td>Rooms, Reservations, Cashier, Inventory, Restaurant, HR, Reports</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Receptionist</strong></td>
-                    <td><span className="status-badge reserved">Front Office</span></td>
-                    <td>Reservations, Rooms, Cashier</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Cashier</strong></td>
-                    <td><span className="status-badge available">Billing & POS</span></td>
-                    <td>Cashier, Reservations</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Storekeeper</strong></td>
-                    <td><span className="status-badge cleaning">Stock Control</span></td>
-                    <td>Inventory</td>
-                  </tr>
-                  <tr>
-                    <td><strong>Restaurant Staff</strong></td>
-                    <td><span className="status-badge available">F&B Operations</span></td>
-                    <td>Restaurant</td>
-                  </tr>
-                  <tr>
-                    <td><strong>HR</strong></td>
-                    <td><span className="status-badge reserved">Personnel</span></td>
-                    <td>HR</td>
-                  </tr>
+                  {customRoles.length === 0 ? (
+                    <tr><td colSpan={3} className="empty-row">No custom roles defined yet. Click "+ Create Custom Role" above.</td></tr>
+                  ) : (
+                    customRoles.map((cr: any) => (
+                      <tr key={cr.id}>
+                        <td><strong>{cr.name}</strong></td>
+                        <td>{cr.description || '—'}</td>
+                        <td>{new Date(cr.created_at).toLocaleDateString()}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -972,7 +1009,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 </thead>
                 <tbody>
                   {membershipsList.length === 0 ? (
-                    <tr><td colSpan={5} className="empty-row">No additional staff assigned yet. Click "+ Invite Staff Member" above.</td></tr>
+                    <tr><td colSpan={5} className="empty-row">No staff assigned yet. Click "+ Invite Staff Member" above.</td></tr>
                   ) : (
                     membershipsList.map((m: any) => (
                       <tr key={m.id}>
@@ -984,7 +1021,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                               value={m.role}
                               onChange={(e) => handleUpdateRole(m.id, e.target.value)}
                               className="form-control"
-                              style={{ padding: '6px 10px', fontSize: '13px', width: '150px' }}
+                              style={{ padding: '6px 10px', fontSize: '13px', width: '180px' }}
                             >
                               <option value="owner">Owner</option>
                               <option value="administrator">Administrator</option>
@@ -993,6 +1030,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                               <option value="cashier">Cashier</option>
                               <option value="storekeeper">Storekeeper</option>
                               <option value="hr">HR</option>
+                              {customRoles.map((cr) => (
+                                <option key={cr.id} value={cr.name}>{cr.name} (Custom)</option>
+                              ))}
                             </select>
                           ) : (
                             <span className="role-badge" style={{ textTransform: 'uppercase' }}>{m.role}</span>
