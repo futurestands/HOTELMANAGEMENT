@@ -17,15 +17,13 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [payments, setPayments] = useState<any[]>([]);
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
-  const [restaurantOrders, setRestaurantOrders] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
-  const [leaveRequests, setLeaveRequests] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee' | 'leave'>('reservation');
+  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee'>('reservation');
 
   // Room Form State
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -169,8 +167,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     try {
       const { data: mData } = await supabase.from('menu_items').select('*').eq('hotel_id', targetHotelId).order('name');
       setMenuItems(mData || []);
-      const { data: oData } = await supabase.from('restaurant_orders').select('*, guest:guests(*), room:rooms(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
-      setRestaurantOrders(oData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch restaurant data.');
     } finally {
@@ -185,8 +181,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     try {
       const { data: eData } = await supabase.from('employees').select('*').eq('hotel_id', targetHotelId).order('full_name');
       setEmployees(eData || []);
-      const { data: lData } = await supabase.from('leave_requests').select('*, employee:employees(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
-      setLeaveRequests(lData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch HR data.');
     } finally {
@@ -436,215 +430,88 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     }
   };
 
-  if (moduleName === 'Rooms') {
-    return (
-      <div className="module-view-container">
-        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="alert-banner success">{notice}</div>}
-        <div className="module-topbar">
-          <div>
-            <h2>Rooms Inventory</h2>
-            <p className="subtitle">Manage hotel rooms, floor placement, status, and room types.</p>
-          </div>
-          {canManage && (
-            <button onClick={() => { setEditingRoom(null); setRoomNumber(''); setModalOpen(true); }} className="btn-primary">
-              + Add New Room
-            </button>
-          )}
-        </div>
-        {modalOpen && (
-          <div className="modal-backdrop">
-            <div className="modal-card">
-              <div className="modal-header">
-                <h3>{editingRoom ? `Edit Room ${editingRoom.room_number}` : 'Add New Hotel Room'}</h3>
-                <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
-              </div>
-              <form onSubmit={handleSaveRoom} className="modal-form">
-                <div className="form-group">
-                  <label>Room Number / Name *</label>
-                  <input type="text" required value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 101" className="form-control" />
-                </div>
-                <div className="form-group">
-                  <label>Floor</label>
-                  <input type="text" value={roomFloor} onChange={(e) => setRoomFloor(e.target.value)} placeholder="1" className="form-control" />
-                </div>
-                <div className="form-group">
-                  <label>Room Type</label>
-                  <select value={roomTypeId} onChange={(e) => setRoomTypeId(e.target.value)} className="form-control">
-                    <option value="">-- Select Room Type --</option>
-                    {roomTypes.map((rt) => (
-                      <option key={rt.id} value={rt.id}>{rt.name} (UGX {rt.base_rate?.toLocaleString()})</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Status</label>
-                  <select value={roomStatus} onChange={(e) => setRoomStatus(e.target.value as Room['status'])} className="form-control">
-                    <option value="available">Available</option>
-                    <option value="reserved">Reserved</option>
-                    <option value="occupied">Occupied</option>
-                    <option value="cleaning">Cleaning</option>
-                    <option value="maintenance">Maintenance</option>
-                    <option value="out_of_service">Out of Service</option>
-                  </select>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button>
-                  <button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Room'}</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
-        <div className="data-card">
-          <div className="data-card-header">
-            <h3>Active Rooms ({rooms.length})</h3>
-            <span className="tenant-badge">Database Backed (RLS)</span>
-          </div>
-          <div className="table-wrapper">
-            <table className="pro-table">
-              <thead>
-                <tr>
-                  <th>Room Number</th>
-                  <th>Floor</th>
-                  <th>Room Type & Rate</th>
-                  <th>Status</th>
-                  <th className="text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr><td colSpan={5} className="empty-row">Loading rooms...</td></tr>
-                ) : rooms.length === 0 ? (
-                  <tr><td colSpan={5} className="empty-row">No rooms configured yet.</td></tr>
-                ) : (
-                  rooms.map((room) => (
-                    <tr key={room.id}>
-                      <td><strong>Room {room.room_number}</strong></td>
-                      <td>Floor {room.floor || '1'}</td>
-                      <td>
-                        {room.room_type ? (
-                          <div>
-                            <span className="room-type-name">{room.room_type.name}</span>
-                            <div className="room-rate">UGX {Number(room.room_type.base_rate).toLocaleString()}</div>
-                          </div>
-                        ) : <span className="text-muted">Standard</span>}
-                      </td>
-                      <td><span className={`status-badge ${room.status}`}>{room.status.replace('_', ' ')}</span></td>
-                      <td className="text-right">
-                        {canManage && <button className="action-link edit" onClick={() => { setEditingRoom(room); setRoomNumber(room.room_number); setRoomFloor(room.floor || '1'); setRoomTypeId(room.room_type_id || ''); setRoomStatus(room.status); setModalOpen(true); }}>Edit</button>}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  return (
+    <div className="module-view-container">
+      {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
+      {notice && <div className="alert-banner success">{notice}</div>}
 
-  if (moduleName === 'Reservations') {
-    return (
-      <div className="module-view-container">
-        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="alert-banner success">{notice}</div>}
-        <div className="module-topbar">
-          <div>
-            <h2>Reservations & Guests</h2>
-            <p className="subtitle">Manage guest records, bookings, check-in, and availability.</p>
-          </div>
+      <div className="module-topbar">
+        <div>
+          <h2>{moduleName}</h2>
+          <p className="subtitle">Manage {moduleName.toLowerCase()} with secure RLS policies and role verification.</p>
+        </div>
+        {moduleName === 'Rooms' && canManage && (
+          <button onClick={() => { setEditingRoom(null); setRoomNumber(''); setModalOpen(true); }} className="btn-primary">
+            + Add New Room
+          </button>
+        )}
+        {moduleName === 'Reservations' && (
           <div style={{ display: 'flex', gap: '10px' }}>
             <button onClick={() => { setSubModal('guest'); setModalOpen(true); }} className="btn-secondary">+ Add Guest</button>
             <button onClick={() => { setSubModal('reservation'); setModalOpen(true); }} className="btn-primary">+ New Booking</button>
           </div>
-        </div>
-        {modalOpen && (
-          <div className="modal-backdrop">
-            <div className="modal-card">
-              <div className="modal-header">
-                <h3>{subModal === 'guest' ? 'Register New Guest' : 'New Reservation Booking'}</h3>
-                <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
-              </div>
-              {subModal === 'guest' ? (
-                <form onSubmit={handleSaveGuest} className="modal-form">
-                  <div className="form-group"><label>Full Name *</label><input type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="John Doe" className="form-control" /></div>
-                  <div className="form-group"><label>Email</label><input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} placeholder="john@example.com" className="form-control" /></div>
-                  <div className="form-group"><label>Phone</label><input type="text" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} placeholder="+256..." className="form-control" /></div>
-                  <div className="form-group"><label>ID / Passport Number</label><input type="text" value={guestIdNum} onChange={(e) => setGuestIdNum(e.target.value)} placeholder="CM..." className="form-control" /></div>
-                  <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Guest'}</button></div>
-                </form>
-              ) : (
-                <form onSubmit={handleSaveReservation} className="modal-form">
-                  <div className="form-group"><label>Select Guest *</label><select required value={resGuestId} onChange={(e) => setResGuestId(e.target.value)} className="form-control"><option value="">-- Choose Guest --</option>{guests.map((g) => <option key={g.id} value={g.id}>{g.full_name} ({g.phone || 'No phone'})</option>)}</select></div>
-                  <div className="form-group"><label>Select Available Room *</label><select required value={resRoomId} onChange={(e) => setResRoomId(e.target.value)} className="form-control"><option value="">-- Choose Room --</option>{rooms.map((r) => <option key={r.id} value={r.id}>Room {r.room_number} ({r.status})</option>)}</select></div>
-                  <div className="form-group"><label>Check-in Date *</label><input type="date" required value={resCheckIn} onChange={(e) => setResCheckIn(e.target.value)} className="form-control" /></div>
-                  <div className="form-group"><label>Check-out Date *</label><input type="date" required value={resCheckOut} onChange={(e) => setResCheckOut(e.target.value)} className="form-control" /></div>
-                  <div className="form-group"><label>Agreed Rate (UGX) *</label><input type="number" required value={resRate} onChange={(e) => setResRate(e.target.value)} className="form-control" /></div>
-                  <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Booking...' : 'Confirm Booking'}</button></div>
-                </form>
-              )}
-            </div>
-          </div>
         )}
-        <div className="data-card" style={{ marginBottom: '24px' }}>
-          <div className="data-card-header"><h3>Active Bookings ({reservations.length})</h3><span className="tenant-badge">Database Backed</span></div>
-          <div className="table-wrapper">
-            <table className="pro-table">
-              <thead><tr><th>Guest</th><th>Room</th><th>Dates</th><th>Rate</th><th>Status</th></tr></thead>
-              <tbody>
-                {reservations.length === 0 ? <tr><td colSpan={5} className="empty-row">No reservations found.</td></tr> : reservations.map((res: any) => (
-                  <tr key={res.id}>
-                    <td><strong>{res.guest?.full_name || 'Guest'}</strong></td>
-                    <td>Room {res.room?.room_number || 'N/A'}</td>
-                    <td>{res.check_in_date} to {res.check_out_date}</td>
-                    <td>UGX {Number(res.agreed_rate).toLocaleString()}</td>
-                    <td><span className={`status-badge ${res.status}`}>{res.status}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="data-card">
-          <div className="data-card-header"><h3>Registered Guests ({guests.length})</h3><span className="tenant-badge">Database Backed</span></div>
-          <div className="table-wrapper">
-            <table className="pro-table">
-              <thead><tr><th>Full Name</th><th>Email</th><th>Phone</th><th>ID Number</th></tr></thead>
-              <tbody>
-                {guests.length === 0 ? <tr><td colSpan={4} className="empty-row">No guests registered yet.</td></tr> : guests.map((g) => (
-                  <tr key={g.id}>
-                    <td><strong>{g.full_name}</strong></td>
-                    <td>{g.email || '—'}</td>
-                    <td>{g.phone || '—'}</td>
-                    <td>{g.id_number || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        {moduleName === 'Cashier' && canCashier && (
+          <button onClick={() => { setSubModal('payment'); setModalOpen(true); }} className="btn-primary">+ Record Payment</button>
+        )}
+        {moduleName === 'Inventory' && canInventory && (
+          <button onClick={() => { setSubModal('stock'); setModalOpen(true); }} className="btn-primary">+ Add Stock Item</button>
+        )}
+        {moduleName === 'Restaurant' && canRestaurant && (
+          <button onClick={() => { setSubModal('menu'); setModalOpen(true); }} className="btn-primary">+ Add Menu Item</button>
+        )}
+        {moduleName === 'HR' && canHr && (
+          <button onClick={() => { setSubModal('employee'); setModalOpen(true); }} className="btn-primary">+ Add Employee</button>
+        )}
       </div>
-    );
-  }
 
-  if (moduleName === 'Cashier') {
-    return (
-      <div className="module-view-container">
-        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="alert-banner success">{notice}</div>}
-        <div className="module-topbar">
-          <div>
-            <h2>Cashier & Billing</h2>
-            <p className="subtitle">Manage guest folios, record payments, and issue receipts.</p>
-          </div>
-          {canCashier && <button onClick={() => { setSubModal('payment'); setModalOpen(true); }} className="btn-primary">+ Record Payment</button>}
-        </div>
-        {modalOpen && subModal === 'payment' && (
-          <div className="modal-backdrop">
-            <div className="modal-card">
-              <div className="modal-header"><h3>Record Guest Payment</h3><button onClick={() => setModalOpen(false)} className="modal-close">&times;</button></div>
+      {modalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal-card">
+            <div className="modal-header">
+              <h3>
+                {moduleName === 'Rooms' && (editingRoom ? `Edit Room ${editingRoom.room_number}` : 'Add New Hotel Room')}
+                {moduleName === 'Reservations' && (subModal === 'guest' ? 'Register New Guest' : 'New Reservation Booking')}
+                {moduleName === 'Cashier' && 'Record Guest Payment'}
+                {moduleName === 'Inventory' && 'Add New Stock Item'}
+                {moduleName === 'Restaurant' && 'Add Menu Item'}
+                {moduleName === 'HR' && 'Add Employee Record'}
+              </h3>
+              <button onClick={() => setModalOpen(false)} className="modal-close">&times;</button>
+            </div>
+
+            {moduleName === 'Rooms' && (
+              <form onSubmit={handleSaveRoom} className="modal-form">
+                <div className="form-group"><label>Room Number / Name *</label><input type="text" required value={roomNumber} onChange={(e) => setRoomNumber(e.target.value)} placeholder="e.g. 101" className="form-control" /></div>
+                <div className="form-group"><label>Floor</label><input type="text" value={roomFloor} onChange={(e) => setRoomFloor(e.target.value)} placeholder="1" className="form-control" /></div>
+                <div className="form-group"><label>Room Type</label><select value={roomTypeId} onChange={(e) => setRoomTypeId(e.target.value)} className="form-control"><option value="">-- Select Room Type --</option>{roomTypes.map((rt) => (<option key={rt.id} value={rt.id}>{rt.name} (UGX {rt.base_rate?.toLocaleString()})</option>))}</select></div>
+                <div className="form-group"><label>Status</label><select value={roomStatus} onChange={(e) => setRoomStatus(e.target.value as Room['status'])} className="form-control"><option value="available">Available</option><option value="reserved">Reserved</option><option value="occupied">Occupied</option><option value="cleaning">Cleaning</option><option value="maintenance">Maintenance</option><option value="out_of_service">Out of Service</option></select></div>
+                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Room'}</button></div>
+              </form>
+            )}
+
+            {moduleName === 'Reservations' && subModal === 'guest' && (
+              <form onSubmit={handleSaveGuest} className="modal-form">
+                <div className="form-group"><label>Full Name *</label><input type="text" required value={guestName} onChange={(e) => setGuestName(e.target.value)} placeholder="John Doe" className="form-control" /></div>
+                <div className="form-group"><label>Email</label><input type="email" value={guestEmail} onChange={(e) => setGuestEmail(e.target.value)} placeholder="john@example.com" className="form-control" /></div>
+                <div className="form-group"><label>Phone</label><input type="text" value={guestPhone} onChange={(e) => setGuestPhone(e.target.value)} placeholder="+256..." className="form-control" /></div>
+                <div className="form-group"><label>ID / Passport Number</label><input type="text" value={guestIdNum} onChange={(e) => setGuestIdNum(e.target.value)} placeholder="CM..." className="form-control" /></div>
+                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Guest'}</button></div>
+              </form>
+            )}
+
+            {moduleName === 'Reservations' && subModal === 'reservation' && (
+              <form onSubmit={handleSaveReservation} className="modal-form">
+                <div className="form-group"><label>Select Guest *</label><select required value={resGuestId} onChange={(e) => setResGuestId(e.target.value)} className="form-control"><option value="">-- Choose Guest --</option>{guests.map((g) => (<option key={g.id} value={g.id}>{g.full_name} ({g.phone || 'No phone'})</option>))}</select></div>
+                <div className="form-group"><label>Select Available Room *</label><select required value={resRoomId} onChange={(e) => setResRoomId(e.target.value)} className="form-control"><option value="">-- Choose Room --</option>{rooms.map((r) => (<option key={r.id} value={r.id}>Room {r.room_number} ({r.status})</option>))}</select></div>
+                <div className="form-group"><label>Check-in Date *</label><input type="date" required value={resCheckIn} onChange={(e) => setResCheckIn(e.target.value)} className="form-control" /></div>
+                <div className="form-group"><label>Check-out Date *</label><input type="date" required value={resCheckOut} onChange={(e) => setResCheckOut(e.target.value)} className="form-control" /></div>
+                <div className="form-group"><label>Agreed Rate (UGX) *</label><input type="number" required value={resRate} onChange={(e) => setResRate(e.target.value)} className="form-control" /></div>
+                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Booking...' : 'Confirm Booking'}</button></div>
+              </form>
+            )}
+
+            {moduleName === 'Cashier' && (
               <form onSubmit={handleRecordPayment} className="modal-form">
                 <div className="form-group"><label>Select Guest Folio *</label><select required value={payFolioId} onChange={(e) => setPayFolioId(e.target.value)} className="form-control"><option value="">-- Choose Folio --</option>{folios.filter(f => f.status !== 'settled').map((f) => (<option key={f.id} value={f.id}>Folio #{f.id.slice(0, 6)} - {f.guest?.full_name || 'Guest'} (Balance: UGX {Number(f.total_charges - f.total_payments).toLocaleString()})</option>))}</select></div>
                 <div className="form-group"><label>Amount (UGX) *</label><input type="number" required value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="form-control" /></div>
@@ -652,10 +519,110 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 <div className="form-group"><label>Reference Number</label><input type="text" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="TXN-98765" className="form-control" /></div>
                 <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Processing...' : 'Record Payment'}</button></div>
               </form>
+            )}
+
+            {moduleName === 'Inventory' && (
+              <form onSubmit={handleSaveStock} className="modal-form">
+                <div className="form-group"><label>Item Name *</label><input type="text" required value={stockName} onChange={(e) => setStockName(e.target.value)} placeholder="e.g. Fresh Milk" className="form-control" /></div>
+                <div className="form-group"><label>Category</label><input type="text" value={stockCategory} onChange={(e) => setStockCategory(e.target.value)} placeholder="Kitchen" className="form-control" /></div>
+                <div className="form-group"><label>Unit</label><input type="text" value={stockUnit} onChange={(e) => setStockUnit(e.target.value)} placeholder="liters / pcs" className="form-control" /></div>
+                <div className="form-group"><label>Quantity in Stock *</label><input type="number" required value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="form-control" /></div>
+                <div className="form-group"><label>Reorder Threshold *</label><input type="number" required value={stockThreshold} onChange={(e) => setStockThreshold(e.target.value)} className="form-control" /></div>
+                <div className="form-group"><label>Unit Cost (UGX) *</label><input type="number" required value={stockCost} onChange={(e) => setStockCost(e.target.value)} className="form-control" /></div>
+                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Stock Item'}</button></div>
+              </form>
+            )}
+
+            {moduleName === 'Restaurant' && (
+              <form onSubmit={handleSaveMenu} className="modal-form">
+                <div className="form-group"><label>Item Name *</label><input type="text" required value={menuName} onChange={(e) => setMenuName(e.target.value)} placeholder="Grilled Tilapia" className="form-control" /></div>
+                <div className="form-group"><label>Category</label><input type="text" value={menuCategory} onChange={(e) => setMenuCategory(e.target.value)} placeholder="Food / Drinks" className="form-control" /></div>
+                <div className="form-group"><label>Price (UGX) *</label><input type="number" required value={menuPrice} onChange={(e) => setMenuPrice(e.target.value)} className="form-control" /></div>
+                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Item'}</button></div>
+              </form>
+            )}
+
+            {moduleName === 'HR' && (
+              <form onSubmit={handleSaveEmployee} className="modal-form">
+                <div className="form-group"><label>Full Name *</label><input type="text" required value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Jane Doe" className="form-control" /></div>
+                <div className="form-group"><label>Position *</label><input type="text" required value={empPos} onChange={(e) => setEmpPos(e.target.value)} placeholder="Receptionist" className="form-control" /></div>
+                <div className="form-group"><label>Department</label><input type="text" value={empDept} onChange={(e) => setEmpDept(e.target.value)} placeholder="Front Office" className="form-control" /></div>
+                <div className="form-group"><label>Phone</label><input type="text" value={empPhone} onChange={(e) => setEmpPhone(e.target.value)} placeholder="+256..." className="form-control" /></div>
+                <div className="form-group"><label>Monthly Salary (UGX) *</label><input type="number" required value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} className="form-control" /></div>
+                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Employee'}</button></div>
+              </form>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Module Data Views */}
+      {moduleName === 'Rooms' && (
+        <div className="data-card">
+          <div className="data-card-header"><h3>Active Rooms ({rooms.length})</h3><span className="tenant-badge">Database Backed (RLS)</span></div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead><tr><th>Room Number</th><th>Floor</th><th>Room Type & Rate</th><th>Status</th><th className="text-right">Actions</th></tr></thead>
+              <tbody>
+                {loading ? <tr><td colSpan={5} className="empty-row">Loading rooms...</td></tr> : rooms.length === 0 ? <tr><td colSpan={5} className="empty-row">No rooms configured yet.</td></tr> : rooms.map((room) => (
+                  <tr key={room.id}>
+                    <td><strong>Room {room.room_number}</strong></td>
+                    <td>Floor {room.floor || '1'}</td>
+                    <td>{room.room_type ? (<div><span className="room-type-name">{room.room_type.name}</span><div className="room-rate">UGX {Number(room.room_type.base_rate).toLocaleString()}</div></div>) : <span className="text-muted">Standard</span>}</td>
+                    <td><span className={`status-badge ${room.status}`}>{room.status.replace('_', ' ')}</span></td>
+                    <td className="text-right">{canManage && <button className="action-link edit" onClick={() => { setEditingRoom(room); setRoomNumber(room.room_number); setRoomFloor(room.floor || '1'); setRoomTypeId(room.room_type_id || ''); setRoomStatus(room.status); setModalOpen(true); }}>Edit</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {moduleName === 'Reservations' && (
+        <>
+          <div className="data-card" style={{ marginBottom: '24px' }}>
+            <div className="data-card-header"><h3>Active Bookings ({reservations.length})</h3><span className="tenant-badge">Database Backed</span></div>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead><tr><th>Guest</th><th>Room</th><th>Dates</th><th>Rate</th><th>Status</th></tr></thead>
+                <tbody>
+                  {reservations.length === 0 ? <tr><td colSpan={5} className="empty-row">No reservations found.</td></tr> : reservations.map((res: any) => (
+                    <tr key={res.id}>
+                      <td><strong>{res.guest?.full_name || 'Guest'}</strong></td>
+                      <td>Room {res.room?.room_number || 'N/A'}</td>
+                      <td>{res.check_in_date} to {res.check_out_date}</td>
+                      <td>UGX {Number(res.agreed_rate).toLocaleString()}</td>
+                      <td><span className={`status-badge ${res.status}`}>{res.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
-        )}
-        <div className="data-card" style={{ marginBottom: '24px' }}>
+          <div className="data-card">
+            <div className="data-card-header"><h3>Registered Guests ({guests.length})</h3><span className="tenant-badge">Database Backed</span></div>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead><tr><th>Full Name</th><th>Email</th><th>Phone</th><th>ID Number</th></tr></thead>
+                <tbody>
+                  {guests.length === 0 ? <tr><td colSpan={4} className="empty-row">No guests registered yet.</td></tr> : guests.map((g) => (
+                    <tr key={g.id}>
+                      <td><strong>{g.full_name}</strong></td>
+                      <td>{g.email || '—'}</td>
+                      <td>{g.phone || '—'}</td>
+                      <td>{g.id_number || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {moduleName === 'Cashier' && (
+        <div className="data-card">
           <div className="data-card-header"><h3>Guest Folios ({folios.length})</h3><span className="tenant-badge">Database Backed</span></div>
           <div className="table-wrapper">
             <table className="pro-table">
@@ -674,38 +641,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             </table>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if (moduleName === 'Inventory') {
-    return (
-      <div className="module-view-container">
-        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="alert-banner success">{notice}</div>}
-        <div className="module-topbar">
-          <div>
-            <h2>Inventory & Stock Control</h2>
-            <p className="subtitle">Manage stock items, reorder thresholds, and inventory levels.</p>
-          </div>
-          {canInventory && <button onClick={() => { setSubModal('stock'); setModalOpen(true); }} className="btn-primary">+ Add Stock Item</button>}
-        </div>
-        {modalOpen && subModal === 'stock' && (
-          <div className="modal-backdrop">
-            <div className="modal-card">
-              <div className="modal-header"><h3>Add New Stock Item</h3><button onClick={() => setModalOpen(false)} className="modal-close">&times;</button></div>
-              <form onSubmit={handleSaveStock} className="modal-form">
-                <div className="form-group"><label>Item Name *</label><input type="text" required value={stockName} onChange={(e) => setStockName(e.target.value)} placeholder="e.g. Fresh Milk" className="form-control" /></div>
-                <div className="form-group"><label>Category</label><input type="text" value={stockCategory} onChange={(e) => setStockCategory(e.target.value)} placeholder="Kitchen" className="form-control" /></div>
-                <div className="form-group"><label>Unit</label><input type="text" value={stockUnit} onChange={(e) => setStockUnit(e.target.value)} placeholder="liters / pcs" className="form-control" /></div>
-                <div className="form-group"><label>Quantity in Stock *</label><input type="number" required value={stockQty} onChange={(e) => setStockQty(e.target.value)} className="form-control" /></div>
-                <div className="form-group"><label>Reorder Threshold *</label><input type="number" required value={stockThreshold} onChange={(e) => setStockThreshold(e.target.value)} className="form-control" /></div>
-                <div className="form-group"><label>Unit Cost (UGX) *</label><input type="number" required value={stockCost} onChange={(e) => setStockCost(e.target.value)} className="form-control" /></div>
-                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Stock Item'}</button></div>
-              </form>
-            </div>
-          </div>
-        )}
+      {moduleName === 'Inventory' && (
         <div className="data-card">
           <div className="data-card-header"><h3>Inventory Stock Items ({stockItems.length})</h3><span className="tenant-badge">Database Backed</span></div>
           <div className="table-wrapper">
@@ -729,35 +667,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             </table>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if (moduleName === 'Restaurant') {
-    return (
-      <div className="module-view-container">
-        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="alert-banner success">{notice}</div>}
-        <div className="module-topbar">
-          <div>
-            <h2>Restaurant & POS</h2>
-            <p className="subtitle">Manage menu items, dining orders, and settlements.</p>
-          </div>
-          {canRestaurant && <button onClick={() => { setSubModal('menu'); setModalOpen(true); }} className="btn-primary">+ Add Menu Item</button>}
-        </div>
-        {modalOpen && subModal === 'menu' && (
-          <div className="modal-backdrop">
-            <div className="modal-card">
-              <div className="modal-header"><h3>Add Menu Item</h3><button onClick={() => setModalOpen(false)} className="modal-close">&times;</button></div>
-              <form onSubmit={handleSaveMenu} className="modal-form">
-                <div className="form-group"><label>Item Name *</label><input type="text" required value={menuName} onChange={(e) => setMenuName(e.target.value)} placeholder="Grilled Tilapia" className="form-control" /></div>
-                <div className="form-group"><label>Category</label><input type="text" value={menuCategory} onChange={(e) => setMenuCategory(e.target.value)} placeholder="Food / Drinks" className="form-control" /></div>
-                <div className="form-group"><label>Price (UGX) *</label><input type="number" required value={menuPrice} onChange={(e) => setMenuPrice(e.target.value)} className="form-control" /></div>
-                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Item'}</button></div>
-              </form>
-            </div>
-          </div>
-        )}
+      {moduleName === 'Restaurant' && (
         <div className="data-card">
           <div className="data-card-header"><h3>Menu Catalog ({menuItems.length})</h3><span className="tenant-badge">Database Backed</span></div>
           <div className="table-wrapper">
@@ -776,37 +688,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             </table>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  if (moduleName === 'HR') {
-    return (
-      <div className="module-view-container">
-        {error && <div className="alert-banner error"><strong>Error:</strong> {error}</div>}
-        {notice && <div className="alert-banner success">{notice}</div>}
-        <div className="module-topbar">
-          <div>
-            <h2>Human Resources & Staff</h2>
-            <p className="subtitle">Manage staff profiles, department assignments, and leave requests.</p>
-          </div>
-          {canHr && <button onClick={() => { setSubModal('employee'); setModalOpen(true); }} className="btn-primary">+ Add Employee</button>}
-        </div>
-        {modalOpen && subModal === 'employee' && (
-          <div className="modal-backdrop">
-            <div className="modal-card">
-              <div className="modal-header"><h3>Add Employee Record</h3><button onClick={() => setModalOpen(false)} className="modal-close">&times;</button></div>
-              <form onSubmit={handleSaveEmployee} className="modal-form">
-                <div className="form-group"><label>Full Name *</label><input type="text" required value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="Jane Doe" className="form-control" /></div>
-                <div className="form-group"><label>Position *</label><input type="text" required value={empPos} onChange={(e) => setEmpPos(e.target.value)} placeholder="Receptionist" className="form-control" /></div>
-                <div className="form-group"><label>Department</label><input type="text" value={empDept} onChange={(e) => setEmpDept(e.target.value)} placeholder="Front Office" className="form-control" /></div>
-                <div className="form-group"><label>Phone</label><input type="text" value={empPhone} onChange={(e) => setEmpPhone(e.target.value)} placeholder="+256..." className="form-control" /></div>
-                <div className="form-group"><label>Monthly Salary (UGX) *</label><input type="number" required value={empSalary} onChange={(e) => setEmpSalary(e.target.value)} className="form-control" /></div>
-                <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Saving...' : 'Save Employee'}</button></div>
-              </form>
-            </div>
-          </div>
-        )}
+      {moduleName === 'HR' && (
         <div className="data-card">
           <div className="data-card-header"><h3>Staff Directory ({employees.length})</h3><span className="tenant-badge">Database Backed</span></div>
           <div className="table-wrapper">
@@ -827,19 +711,65 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
             </table>
           </div>
         </div>
-      </div>
-    );
-  }
+      )}
 
-  return (
-    <div className="module-container">
-      <div className="data-card" style={{ padding: '60px 20px', textAlign: 'center' }}>
-        <h2>{moduleName} Module</h2>
-        <p className="subtitle" style={{ margin: '8px 0 20px' }}>
-          This module is fully database-backed and operational.
-        </p>
-        <span className="tenant-badge">Database Backed</span>
-      </div>
+      <style>{`
+        .module-view-container { display: flex; flex-direction: column; gap: 24px; }
+        .alert-banner { padding: 14px 18px; border-radius: 10px; font-weight: 600; font-size: 14px; }
+        .alert-banner.error { background: #fff1f0; color: #b42318; border: 1px solid #fecdca; }
+        .alert-banner.success { background: #edfdf4; color: #027a48; border: 1px solid #abefc6; }
+
+        .module-topbar { display: flex; justify-content: space-between; align-items: center; background: white; padding: 24px; border-radius: 14px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+        .module-topbar h2 { margin: 0; font-size: 22px; color: #0f172a; }
+        .subtitle { margin: 4px 0 0; color: #64748b; font-size: 14px; }
+
+        .btn-primary { background: #0f172a; color: white; border: none; padding: 10px 18px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: background 0.2s; }
+        .btn-primary:hover { background: #1e293b; }
+        .btn-secondary { background: #f1f5f9; color: #475569; border: none; padding: 10px 16px; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; }
+        .btn-secondary:hover { background: #e2e8f0; }
+
+        .data-card { background: white; border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.02); }
+        .data-card-header { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; }
+        .data-card-header h3 { margin: 0; font-size: 16px; color: #0f172a; }
+        .tenant-badge { background: #eff6ff; color: #1d4ed8; padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+
+        .table-wrapper { overflow-x: auto; }
+        .pro-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        .pro-table th { background: #f8fafc; padding: 14px 24px; color: #475569; font-weight: 650; border-bottom: 1px solid #e2e8f0; }
+        .pro-table td { padding: 16px 24px; border-bottom: 1px solid #f1f5f9; color: #334155; vertical-align: middle; }
+        .empty-row { text-align: center; padding: 50px !important; color: #64748b; }
+
+        .room-type-name { font-weight: 600; color: #0f172a; }
+        .room-rate { font-size: 12px; color: #64748b; margin-top: 2px; }
+
+        .status-badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+        .status-badge.available { background: #dcfce7; color: #15803d; }
+        .status-badge.occupied { background: #e0f2fe; color: #0369a1; }
+        .status-badge.reserved { background: #fef3c7; color: #b45309; }
+        .status-badge.cleaning { background: #f3e8ff; color: #7e22ce; }
+        .status-badge.maintenance, .status-badge.out_of_service { background: #fee2e2; color: #b91c1c; }
+
+        .text-right { text-align: right; }
+        .action-link { background: none; border: none; color: #2563eb; font-weight: 600; font-size: 13px; cursor: pointer; padding: 4px 8px; }
+        .action-link:hover { text-decoration: underline; }
+        .action-link.edit { color: #0d9488; }
+
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); display: grid; place-items: center; z-index: 1000; padding: 20px; }
+        .modal-card { background: white; border-radius: 16px; width: 100%; max-width: 480px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1), 0 10px 10px -5px rgba(0,0,0,0.04); overflow: hidden; animation: modalPop 0.2s ease-out; }
+        @keyframes modalPop { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+
+        .modal-header { padding: 20px 24px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9; background: #f8fafc; }
+        .modal-header h3 { margin: 0; font-size: 18px; color: #0f172a; }
+        .modal-close { background: none; border: none; font-size: 24px; color: #64748b; cursor: pointer; }
+
+        .modal-form { padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+        .form-group { display: flex; flex-direction: column; gap: 6px; }
+        .form-group label { font-size: 13px; font-weight: 600; color: #334155; }
+        .form-control { padding: 10px 14px; border-radius: 8px; border: 1px solid #cbd5e1; font-size: 14px; outline: none; background: white; color: #0f172a; transition: border-color 0.2s, box-shadow 0.2s; }
+        .form-control:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+
+        .modal-footer { padding: 16px 24px; background: #f8fafc; border-top: 1px solid #f1f5f9; display: flex; justify-content: flex-end; gap: 10px; }
+      `}</style>
     </div>
   );
 };
