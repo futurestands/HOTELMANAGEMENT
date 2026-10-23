@@ -23,7 +23,8 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
-  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee'>('reservation');
+  const [subModal, setSubModal] = useState<'guest' | 'reservation' | 'payment' | 'stock' | 'menu' | 'employee' | 'receipt'>('reservation');
+  const [selectedReceipt, setSelectedReceipt] = useState<any>(null);
 
   // Room Form State
   const [editingRoom, setEditingRoom] = useState<Room | null>(null);
@@ -137,7 +138,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     try {
       const { data: fData } = await supabase.from('folios').select('*, guest:guests(*), reservation:reservations(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
       setFolios(fData || []);
-      const { data: pData } = await supabase.from('payments').select('*').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
+      const { data: pData } = await supabase.from('payments').select('*, folio:folios(id, guest:guests(full_name))').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
       setPayments(pData || []);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch cashier records.');
@@ -315,13 +316,13 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
     setNotice(null);
 
     try {
-      const { error: payErr } = await supabase.from('payments').insert([{
+      const { data: payData, error: payErr } = await supabase.from('payments').insert([{
         hotel_id: hotelId,
         folio_id: payFolioId || null,
         amount: amountVal,
         payment_method: payMethod,
         reference_number: payRef.trim() || `TXN-${Date.now()}`
-      }]);
+      }]).select().single();
 
       if (payErr) throw payErr;
 
@@ -341,6 +342,12 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       setModalOpen(false);
       setPayRef('');
       await fetchCashierData(hotelId);
+
+      if (payData) {
+        setSelectedReceipt(payData);
+        setSubModal('receipt');
+        setModalOpen(true);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to record payment.');
     } finally {
@@ -472,7 +479,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
               <h3>
                 {moduleName === 'Rooms' && (editingRoom ? `Edit Room ${editingRoom.room_number}` : 'Add New Hotel Room')}
                 {moduleName === 'Reservations' && (subModal === 'guest' ? 'Register New Guest' : 'New Reservation Booking')}
-                {moduleName === 'Cashier' && 'Record Guest Payment'}
+                {moduleName === 'Cashier' && (subModal === 'receipt' ? 'Official Payment Receipt' : 'Record Guest Payment')}
                 {moduleName === 'Inventory' && 'Add New Stock Item'}
                 {moduleName === 'Restaurant' && 'Add Menu Item'}
                 {moduleName === 'HR' && 'Add Employee Record'}
@@ -511,7 +518,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
               </form>
             )}
 
-            {moduleName === 'Cashier' && (
+            {moduleName === 'Cashier' && subModal === 'payment' && (
               <form onSubmit={handleRecordPayment} className="modal-form">
                 <div className="form-group"><label>Select Guest Folio *</label><select required value={payFolioId} onChange={(e) => setPayFolioId(e.target.value)} className="form-control"><option value="">-- Choose Folio --</option>{folios.filter(f => f.status !== 'settled').map((f) => (<option key={f.id} value={f.id}>Folio #{f.id.slice(0, 6)} - {f.guest?.full_name || 'Guest'} (Balance: UGX {Number(f.total_charges - f.total_payments).toLocaleString()})</option>))}</select></div>
                 <div className="form-group"><label>Amount (UGX) *</label><input type="number" required value={payAmount} onChange={(e) => setPayAmount(e.target.value)} className="form-control" /></div>
@@ -519,6 +526,24 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
                 <div className="form-group"><label>Reference Number</label><input type="text" value={payRef} onChange={(e) => setPayRef(e.target.value)} placeholder="TXN-98765" className="form-control" /></div>
                 <div className="modal-footer"><button type="button" onClick={() => setModalOpen(false)} className="btn-secondary">Cancel</button><button type="submit" disabled={submitting} className="btn-primary">{submitting ? 'Processing...' : 'Record Payment'}</button></div>
               </form>
+            )}
+
+            {moduleName === 'Cashier' && subModal === 'receipt' && selectedReceipt && (
+              <div style={{ padding: '24px' }}>
+                <div style={{ textAlign: 'center', marginBottom: '20px' }}>
+                  <h3>🏨 HotelOS Official Receipt</h3>
+                  <p style={{ fontSize: '12px', color: '#64748b' }}>Transaction Ref: {selectedReceipt.reference_number}</p>
+                </div>
+                <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '10px', fontSize: '14px', marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div><strong>Date:</strong> {new Date(selectedReceipt.created_at).toLocaleString()}</div>
+                  <div><strong>Payment Method:</strong> {selectedReceipt.payment_method.toUpperCase()}</div>
+                  <div><strong>Amount Paid:</strong> UGX {Number(selectedReceipt.amount).toLocaleString()}</div>
+                </div>
+                <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+                  <button type="button" onClick={() => window.print()} className="btn-secondary">🖨️ Print Receipt</button>
+                  <button type="button" onClick={() => setModalOpen(false)} className="btn-primary">Done</button>
+                </div>
+              </div>
             )}
 
             {moduleName === 'Inventory' && (
@@ -622,25 +647,49 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       )}
 
       {moduleName === 'Cashier' && (
-        <div className="data-card">
-          <div className="data-card-header"><h3>Guest Folios ({folios.length})</h3><span className="tenant-badge">Database Backed</span></div>
-          <div className="table-wrapper">
-            <table className="pro-table">
-              <thead><tr><th>Folio ID</th><th>Guest</th><th>Total Charges</th><th>Total Paid</th><th>Status</th></tr></thead>
-              <tbody>
-                {folios.length === 0 ? <tr><td colSpan={5} className="empty-row">No active folios found.</td></tr> : folios.map((f: any) => (
-                  <tr key={f.id}>
-                    <td><strong>#{f.id.slice(0, 8)}</strong></td>
-                    <td>{f.guest?.full_name || 'Guest'}</td>
-                    <td>UGX {Number(f.total_charges).toLocaleString()}</td>
-                    <td>UGX {Number(f.total_payments).toLocaleString()}</td>
-                    <td><span className={`status-badge ${f.status}`}>{f.status}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="data-card" style={{ marginBottom: '24px' }}>
+            <div className="data-card-header"><h3>Guest Folios ({folios.length})</h3><span className="tenant-badge">Database Backed</span></div>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead><tr><th>Folio ID</th><th>Guest</th><th>Total Charges</th><th>Total Paid</th><th>Status</th></tr></thead>
+                <tbody>
+                  {folios.length === 0 ? <tr><td colSpan={5} className="empty-row">No active folios found.</td></tr> : folios.map((f: any) => (
+                    <tr key={f.id}>
+                      <td><strong>#{f.id.slice(0, 8)}</strong></td>
+                      <td>{f.guest?.full_name || 'Guest'}</td>
+                      <td>UGX {Number(f.total_charges).toLocaleString()}</td>
+                      <td>UGX {Number(f.total_payments).toLocaleString()}</td>
+                      <td><span className={`status-badge ${f.status}`}>{f.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          <div className="data-card">
+            <div className="data-card-header"><h3>Payment Transactions ({payments.length})</h3><span className="tenant-badge">Database Backed</span></div>
+            <div className="table-wrapper">
+              <table className="pro-table">
+                <thead><tr><th>Reference</th><th>Method</th><th>Amount</th><th>Date</th><th className="text-right">Action</th></tr></thead>
+                <tbody>
+                  {payments.length === 0 ? <tr><td colSpan={5} className="empty-row">No payments recorded yet.</td></tr> : payments.map((p: any) => (
+                    <tr key={p.id}>
+                      <td><strong>{p.reference_number}</strong></td>
+                      <td style={{ textTransform: 'capitalize' }}>{p.payment_method.replace('_', ' ')}</td>
+                      <td>UGX {Number(p.amount).toLocaleString()}</td>
+                      <td>{new Date(p.created_at).toLocaleDateString()}</td>
+                      <td className="text-right">
+                        <button className="action-link" onClick={() => { setSelectedReceipt(p); setSubModal('receipt'); setModalOpen(true); }}>🖨️ Receipt</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
       {moduleName === 'Inventory' && (
@@ -745,7 +794,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         .status-badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
         .status-badge.available { background: #dcfce7; color: #15803d; }
         .status-badge.occupied { background: #e0f2fe; color: #0369a1; }
-        .status-badge.reserved { background: #fef3c7; color: #b45309; }
+        .status-badge.reserved {background: #fef3c7; color: #b45309; }
         .status-badge.cleaning { background: #f3e8ff; color: #7e22ce; }
         .status-badge.maintenance, .status-badge.out_of_service { background: #fee2e2; color: #b91c1c; }
 
