@@ -18,6 +18,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const [stockItems, setStockItems] = useState<StockItem[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
+  const [membershipsList, setMembershipsList] = useState<any[]>([]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,9 +80,14 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const canInventory = ['owner', 'administrator', 'manager', 'storekeeper'].includes(userRole || '');
   const canRestaurant = ['owner', 'administrator', 'manager', 'restaurant_staff', 'cashier'].includes(userRole || '');
   const canHr = ['owner', 'administrator', 'manager', 'hr'].includes(userRole || '');
+  const isAdminOrOwner = ['owner', 'administrator'].includes(userRole || '');
 
   useEffect(() => {
+    // Clear notices when switching modules
+    setError(null);
+    setNotice(null);
     if (!hotelId) return;
+
     if (moduleName === 'Rooms') {
       fetchRoomsAndTypes(hotelId);
     } else if (moduleName === 'Reservations') {
@@ -94,13 +100,14 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       fetchRestaurantData(hotelId);
     } else if (moduleName === 'HR') {
       fetchHrData(hotelId);
+    } else if (moduleName === 'Settings') {
+      fetchSettingsData(hotelId);
     }
   }, [moduleName, hotelId]);
 
   const fetchRoomsAndTypes = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
-    setError(null);
     try {
       const { data: typesData } = await supabase.from('room_types').select('*').eq('hotel_id', targetHotelId);
       setRoomTypes(typesData || []);
@@ -116,7 +123,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const fetchReservationsAndFixtures = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
-    setError(null);
     try {
       const { data: gData } = await supabase.from('guests').select('*').eq('hotel_id', targetHotelId);
       setGuests(gData || []);
@@ -134,7 +140,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const fetchCashierData = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
-    setError(null);
     try {
       const { data: fData } = await supabase.from('folios').select('*, guest:guests(*), reservation:reservations(*)').eq('hotel_id', targetHotelId).order('created_at', { ascending: false });
       setFolios(fData || []);
@@ -150,7 +155,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const fetchInventoryData = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
-    setError(null);
     try {
       const { data: sData } = await supabase.from('stock_items').select('*').eq('hotel_id', targetHotelId).order('name');
       setStockItems(sData || []);
@@ -164,7 +168,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const fetchRestaurantData = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
-    setError(null);
     try {
       const { data: mData } = await supabase.from('menu_items').select('*').eq('hotel_id', targetHotelId).order('name');
       setMenuItems(mData || []);
@@ -178,7 +181,6 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
   const fetchHrData = async (targetHotelId: string) => {
     if (!supabase) return;
     setLoading(true);
-    setError(null);
     try {
       const { data: eData } = await supabase.from('employees').select('*').eq('hotel_id', targetHotelId).order('full_name');
       setEmployees(eData || []);
@@ -186,6 +188,47 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       setError(err.message || 'Failed to fetch HR data.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchSettingsData = async (targetHotelId: string) => {
+    if (!supabase) return;
+    setLoading(true);
+    try {
+      const { data: mData } = await supabase.from('hotel_memberships').select('*, profiles(id, full_name, email)').eq('hotel_id', targetHotelId);
+      setMembershipsList(mData || []);
+    } catch (err: any) {
+      setError(err.message || 'Failed to fetch staff roles.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUpdateRole = async (membershipId: string, newRole: string) => {
+    if (!supabase) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: updErr } = await supabase.from('hotel_memberships').update({ role: newRole }).eq('id', membershipId);
+      if (updErr) throw updErr;
+      setNotice('Staff role updated successfully.');
+      await fetchSettingsData(hotelId!);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update role.');
+    }
+  };
+
+  const handleToggleActive = async (membershipId: string, currentStatus: boolean) => {
+    if (!supabase) return;
+    setError(null);
+    setNotice(null);
+    try {
+      const { error: updErr } = await supabase.from('hotel_memberships').update({ is_active: !currentStatus }).eq('id', membershipId);
+      if (updErr) throw updErr;
+      setNotice('Staff access status updated.');
+      await fetchSettingsData(hotelId!);
+    } catch (err: any) {
+      setError(err.message || 'Failed to update access status.');
     }
   };
 
@@ -445,7 +488,9 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
       <div className="module-topbar">
         <div>
           <h2>{moduleName}</h2>
-          <p className="subtitle">Manage {moduleName.toLowerCase()} with secure RLS policies and role verification.</p>
+          <p className="subtitle">
+            {moduleName === 'Settings' ? 'Manage property configurations, staff roles, and access rights.' : `Manage ${moduleName.toLowerCase()} with secure RLS policies and role verification.`}
+          </p>
         </div>
         {moduleName === 'Rooms' && canManage && (
           <button onClick={() => { setEditingRoom(null); setRoomNumber(''); setModalOpen(true); }} className="btn-primary">
@@ -762,6 +807,81 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         </div>
       )}
 
+      {moduleName === 'Settings' && (
+        <div className="data-card">
+          <div className="data-card-header">
+            <h3>Staff Access Rights & Role Management</h3>
+            <span className="tenant-badge">Database Backed (RLS)</span>
+          </div>
+          <div style={{ padding: '20px 24px', borderBottom: '1px solid #f1f5f9' }}>
+            <p className="subtitle" style={{ margin: 0 }}>
+              Manage staff memberships, assign operational roles (Owner, Manager, Receptionist, Cashier, Storekeeper, HR), and toggle staff access rights.
+            </p>
+          </div>
+          <div className="table-wrapper">
+            <table className="pro-table">
+              <thead>
+                <tr>
+                  <th>Staff Member</th>
+                  <th>Email</th>
+                  <th>Assigned Role</th>
+                  <th>Access Status</th>
+                  <th className="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {membershipsList.length === 0 ? (
+                  <tr><td colSpan={5} className="empty-row">No staff memberships found.</td></tr>
+                ) : (
+                  membershipsList.map((m: any) => (
+                    <tr key={m.id}>
+                      <td><strong>{m.profiles?.full_name || 'Staff Member'}</strong></td>
+                      <td>{m.profiles?.email || '—'}</td>
+                      <td>
+                        {isAdminOrOwner ? (
+                          <select
+                            value={m.role}
+                            onChange={(e) => handleUpdateRole(m.id, e.target.value)}
+                            className="form-control"
+                            style={{ padding: '6px 10px', fontSize: '13px', width: '150px' }}
+                          >
+                            <option value="owner">Owner</option>
+                            <option value="administrator">Administrator</option>
+                            <option value="manager">Manager</option>
+                            <option value="receptionist">Receptionist</option>
+                            <option value="cashier">Cashier</option>
+                            <option value="storekeeper">Storekeeper</option>
+                            <option value="hr">HR</option>
+                          </select>
+                        ) : (
+                          <span className="role-badge" style={{ textTransform: 'uppercase' }}>{m.role}</span>
+                        )}
+                      </td>
+                      <td>
+                        <span className={`status-badge ${m.is_active ? 'available' : 'maintenance'}`}>
+                          {m.is_active ? 'Active' : 'Revoked'}
+                        </span>
+                      </td>
+                      <td className="text-right">
+                        {isAdminOrOwner && (
+                          <button
+                            className="action-link"
+                            style={{ color: m.is_active ? '#dc2626' : '#16a34a' }}
+                            onClick={() => handleToggleActive(m.id, m.is_active)}
+                          >
+                            {m.is_active ? 'Revoke Access' : 'Restore Access'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <style>{`
         .module-view-container { display: flex; flex-direction: column; gap: 24px; }
         .alert-banner { padding: 14px 18px; border-radius: 10px; font-weight: 600; font-size: 14px; }
@@ -794,7 +914,7 @@ export const ModuleViews: React.FC<ModuleViewProps> = ({ moduleName, hotelId, us
         .status-badge { display: inline-block; padding: 5px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
         .status-badge.available { background: #dcfce7; color: #15803d; }
         .status-badge.occupied { background: #e0f2fe; color: #0369a1; }
-        .status-badge.reserved {background: #fef3c7; color: #b45309; }
+        .status-badge.reserved { background: #fef3c7; color: #b45309; }
         .status-badge.cleaning { background: #f3e8ff; color: #7e22ce; }
         .status-badge.maintenance, .status-badge.out_of_service { background: #fee2e2; color: #b91c1c; }
 
