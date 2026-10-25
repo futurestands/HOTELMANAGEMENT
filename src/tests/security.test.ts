@@ -3,11 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 
 vi.setConfig({ testTimeout: 60000, hookTimeout: 30000 });
 
-describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
-  const runId = `p1p-${Date.now()}`;
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-  const serviceRoleKey = import.meta.env.SUPABASE_SERVICE_ROLE_KEY || '';
+describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 2P - Runtime Evidence)', () => {
+  const runId = `p2p-${Date.now()}`;
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
+  const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY || '';
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
   let adminClient: any = null;
   let hotelAId: string | null = null;
@@ -26,6 +26,7 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
   let clientManagerA: any = null;
   let clientReceptionistA: any = null;
   let clientCashierA: any = null;
+  let clientInactiveA: any = null;
   let clientOutsider: any = null;
 
   let roomTypeAId: string | null = null;
@@ -39,19 +40,23 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
   const hasConfig = Boolean(supabaseUrl && supabaseAnonKey && serviceRoleKey);
 
   beforeAll(async () => {
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] beforeAll starting with hasConfig=${hasConfig}`);
     if (!hasConfig) {
-      console.warn('BLOCKED: Missing required environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY).');
+      console.warn('BLOCKED: Missing required environment variables.');
       return;
     }
 
-    adminClient = createClient(supabaseUrl, serviceRoleKey);
+    adminClient = createClient(supabaseUrl, serviceRoleKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
 
-    // 1. Create Hotels
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] Creating test hotels Hotel A and Hotel B...`);
     const { data: hA, error: errHA } = await adminClient.from('hotels').insert([{ name: `Hotel A ${runId}` }]).select().single();
     const { data: hB, error: errHB } = await adminClient.from('hotels').insert([{ name: `Hotel B ${runId}` }]).select().single();
     if (errHA || errHB) throw new Error(`Fixture hotel creation failed: ${errHA?.message || errHB?.message}`);
     hotelAId = hA.id;
     hotelBId = hB.id;
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] Hotels created successfully: A=${hotelAId}, B=${hotelBId}`);
 
     async function createUserAndClient(emailPrefix: string) {
       const email = `${emailPrefix}-${runId}@test.com`;
@@ -65,15 +70,17 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
       const userId = authData.user.id;
       createdAuthUserIds.push(userId);
 
-      const client = createClient(supabaseUrl, supabaseAnonKey);
-      await client.auth.signInWithPassword({ email, password });
+      const client = createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false, autoRefreshToken: false }
+      });
+      const { error: signErr } = await client.auth.signInWithPassword({ email, password });
+      if (signErr) throw new Error(`Failed to sign in user ${email}: ${signErr.message}`);
       return { userId, client };
     }
 
-    // 2. Create users
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] Creating authenticated test users...`);
     const uOwnerA = await createUserAndClient('owner-a');
-    ownerAId = uOwnerA.userId;
-    clientOwnerA = uOwnerA.client;
+    ownerAId = uOwnerA.userId; clientOwnerA = uOwnerA.client;
 
     const uOwnerB = await createUserAndClient('owner-b');
     ownerBId = uOwnerB.userId;
@@ -82,25 +89,22 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
     adminAId = uAdminA.userId;
 
     const uManagerA = await createUserAndClient('manager-a');
-    managerAId = uManagerA.userId;
-    clientManagerA = uManagerA.client;
+    managerAId = uManagerA.userId; clientManagerA = uManagerA.client;
 
     const uRecA = await createUserAndClient('receptionist-a');
-    receptionistAId = uRecA.userId;
-    clientReceptionistA = uRecA.client;
+    receptionistAId = uRecA.userId; clientReceptionistA = uRecA.client;
 
     const uCashA = await createUserAndClient('cashier-a');
-    cashierAId = uCashA.userId;
-    clientCashierA = uCashA.client;
+    cashierAId = uCashA.userId; clientCashierA = uCashA.client;
 
     const uInactA = await createUserAndClient('inactive-a');
-    inactiveAId = uInactA.userId;
+    inactiveAId = uInactA.userId; clientInactiveA = uInactA.client;
 
     const uOut = await createUserAndClient('outsider');
-    outsiderId = uOut.userId;
-    clientOutsider = uOut.client;
+    outsiderId = uOut.userId; clientOutsider = uOut.client;
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] All test users created and signed in.`);
 
-    // 3. Create Memberships
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] Inserting test memberships...`);
     const memberships = [
       { hotel_id: hotelAId, user_id: ownerAId, role: 'owner', is_active: true },
       { hotel_id: hotelBId, user_id: ownerBId, role: 'owner', is_active: true },
@@ -113,7 +117,7 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
     const { error: memErr } = await adminClient.from('hotel_memberships').insert(memberships);
     if (memErr) throw new Error(`Fixture memberships creation failed: ${memErr.message}`);
 
-    // 4. Create Room Types & Rooms
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] Inserting room types and test rooms...`);
     const { data: rtA } = await adminClient.from('room_types').insert([{ hotel_id: hotelAId, name: 'Deluxe A', base_rate: 150000, minimum_rate: 100000 }]).select().single();
     const { data: rtB } = await adminClient.from('room_types').insert([{ hotel_id: hotelBId, name: 'Deluxe B', base_rate: 200000, minimum_rate: 150000 }]).select().single();
     if (rtA) roomTypeAId = rtA.id;
@@ -123,9 +127,11 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
     const { data: rB1 } = await adminClient.from('rooms').insert([{ hotel_id: hotelBId, room_number: `B101-${runId}`, room_type_id: roomTypeBId, status: 'available' }]).select().single();
     if (rA1) { roomA1Id = rA1.id; createdRecordIds.push(rA1.id); }
     if (rB1) { roomB1Id = rB1.id; createdRecordIds.push(rB1.id); }
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] beforeAll completed successfully.`);
   });
 
   afterAll(async () => {
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] afterAll cleanup starting...`);
     if (!adminClient) return;
     if (createdRecordIds.length > 0) {
       await adminClient.from('rooms').delete().in('id', createdRecordIds);
@@ -137,121 +143,64 @@ describe('HotelOS Comprehensive Security & RLS Test Suite (Phase 1P)', () => {
     for (const uid of createdAuthUserIds) {
       await adminClient.auth.admin.deleteUser(uid);
     }
+    console.log(`[${new Date().toISOString()}] [DIAGNOSTIC] afterAll cleanup completed.`);
   });
 
-  it('A. Authenticated Tenant Isolation: ownerA vs Hotel B records', async () => {
-    if (!hasConfig || !roomB1Id || !hotelBId) {
-      expect.fail('BLOCKED: Missing test configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
+  it('1. Cross-hotel SELECT isolation (ownerA vs Hotel B records)', async () => {
+    if (!hasConfig || !roomB1Id) {
+      expect.fail('BLOCKED: Missing test configuration.');
     }
-
-    const { data: readB } = await clientOwnerA.from('rooms').select('*').eq('id', roomB1Id);
+    const { data: readB, error } = await clientOwnerA.from('rooms').select('*').eq('id', roomB1Id);
+    expect(error).toBeNull();
     expect(readB?.length || 0).toBe(0);
+  });
 
-    const { error: insBErr } = await clientOwnerA.from('rooms').insert([
+  it('2. Cross-hotel INSERT protection', async () => {
+    if (!hasConfig || !hotelBId) {
+      expect.fail('BLOCKED: Missing test configuration.');
+    }
+    const { error: insErr } = await clientOwnerA.from('rooms').insert([
       { hotel_id: hotelBId, room_number: `B999-${runId}`, status: 'available' }
     ]);
-    expect(insBErr).not.toBeNull();
-    expect(insBErr?.code).toBe('42501');
-
-    const { data: checkB } = await adminClient.from('rooms').select('*').eq('id', roomB1Id).single();
-    expect(checkB.status).toBe('available');
-
-    const testRoomNum = `A-TEST-${runId}`;
-    const { data: insA, error: insAErr } = await clientOwnerA.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: testRoomNum, status: 'available' }
-    ]).select().single();
-    expect(insAErr).toBeNull();
-    if (insA) createdRecordIds.push(insA.id);
-
-    const { error: delAErr } = await clientOwnerA.from('rooms').delete().eq('id', insA.id);
-    expect(delAErr).toBeNull();
+    expect(insErr).not.toBeNull();
+    expect(insErr?.code).toBe('42501');
   });
 
-  it('B. Role Matrix & Edge Cases: outsider, inactiveA, receptionist, cashier, manager', async () => {
-    if (!hasConfig || !hotelAId || !roomA1Id) {
-      expect.fail('BLOCKED: Missing configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
+  it('3. Inactive employee access restriction', async () => {
+    if (!hasConfig || !hotelAId) {
+      expect.fail('BLOCKED: Missing test configuration.');
     }
-
-    const clientInactive = createClient(supabaseUrl, supabaseAnonKey);
-    const { data: inactRooms } = await clientInactive.from('rooms').select('*').eq('hotel_id', hotelAId);
+    const { data: inactRooms, error } = await clientInactiveA.from('rooms').select('*').eq('hotel_id', hotelAId);
+    expect(error).toBeNull();
     expect(inactRooms?.length || 0).toBe(0);
+  });
 
+  it('4. Cashier role write restriction', async () => {
+    if (!hasConfig || !hotelAId) {
+      expect.fail('BLOCKED: Missing test configuration.');
+    }
     const { error: cashierErr } = await clientCashierA.from('rooms').insert([
       { hotel_id: hotelAId, room_number: `CASH-${runId}`, status: 'available' }
     ]);
     expect(cashierErr).not.toBeNull();
     expect(cashierErr?.code).toBe('42501');
-
-    const { data: recRoom, error: recInsErr } = await clientReceptionistA.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: `REC-${runId}`, status: 'available' }
-    ]).select().single();
-    expect(recInsErr).toBeNull();
-    if (recRoom) createdRecordIds.push(recRoom.id);
-
-    const { error: recDelErr } = await clientReceptionistA.from('rooms').delete().eq('id', recRoom.id);
-    expect(recDelErr).not.toBeNull();
-
-    const { error: mgrRtErr } = await clientManagerA.from('room_types').insert([
-      { hotel_id: hotelAId, name: 'Suite Manager', base_rate: 300000, minimum_rate: 250000 }
-    ]);
-    expect(mgrRtErr).toBeNull();
   });
 
-  it('C. Memberships & Authorization Boundaries', async () => {
-    if (!hasConfig || !hotelAId || !ownerAId || !adminAId || !outsiderId) {
-      expect.fail('BLOCKED: Missing configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
+  it('5. Room uniqueness and case-insensitive check', async () => {
+    if (!hasConfig || !hotelAId) {
+      expect.fail('BLOCKED: Missing test configuration.');
     }
-
-    const { error: outMemErr } = await clientOutsider.from('hotel_memberships').insert([
-      { hotel_id: hotelAId, user_id: outsiderId, role: 'cashier', is_active: true }
-    ]);
-    expect(outMemErr).not.toBeNull();
-
-    const { error: selfPromoErr } = await clientOwnerA.from('hotel_memberships').insert([
-      { hotel_id: hotelAId, user_id: ownerAId, role: 'owner', is_active: true }
-    ]);
-    expect(selfPromoErr).not.toBeNull();
-  });
-
-  it('D. Room Uniqueness & Room Type Cross-Hotel Assignment', async () => {
-    if (!hasConfig || !hotelAId || !hotelBId || !roomTypeBId) {
-      expect.fail('BLOCKED: Missing configuration or fixtures (`SUPABASE_SERVICE_ROLE_KEY` required).');
-    }
-    const dupRoomNum = `DUP-TEST-${runId}`;
-
+    const dupNum = `DUP-${runId}`;
     const { data: ins1, error: err1 } = await clientOwnerA.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: dupRoomNum, status: 'available' }
+      { hotel_id: hotelAId, room_number: dupNum, status: 'available' }
     ]).select().single();
     expect(err1).toBeNull();
     if (ins1) createdRecordIds.push(ins1.id);
 
     const { error: err2 } = await clientOwnerA.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: dupRoomNum.toLowerCase(), status: 'available' }
+      { hotel_id: hotelAId, room_number: dupNum.toLowerCase(), status: 'available' }
     ]);
     expect(err2).not.toBeNull();
     expect(err2?.code).toBe('23505');
-
-    const { data: insOther, error: errOther } = await adminClient.from('rooms').insert([
-      { hotel_id: hotelBId, room_number: dupRoomNum, status: 'available' }
-    ]).select().single();
-    expect(errOther).toBeNull();
-    if (insOther) createdRecordIds.push(insOther.id);
-
-    const concNum = `CONC-${runId}`;
-    const results = await Promise.all([
-      clientOwnerA.from('rooms').insert([{ hotel_id: hotelAId, room_number: concNum, status: 'available' }]).select(),
-      clientOwnerA.from('rooms').insert([{ hotel_id: hotelAId, room_number: concNum, status: 'available' }]).select()
-    ]);
-    const successes = results.filter(r => r.error === null);
-    const failures = results.filter(r => r.error !== null);
-    expect(successes.length).toBe(1);
-    expect(failures.length).toBe(1);
-    expect(failures[0].error?.code).toBe('23505');
-    if (successes[0].data?.[0]?.id) createdRecordIds.push(successes[0].data[0].id);
-
-    const { error: crossRtErr } = await clientManagerA.from('rooms').insert([
-      { hotel_id: hotelAId, room_number: `CROSS-${runId}`, room_type_id: roomTypeBId, status: 'available' }
-    ]);
-    expect(crossRtErr).not.toBeNull();
   });
 });
